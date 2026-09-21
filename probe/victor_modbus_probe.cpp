@@ -69,11 +69,19 @@ uint16_t crc16(const uint8_t *data, size_t len) {
   for(size_t pos=0;pos<len;++pos){ crc^=data[pos]; for(uint8_t i=0;i<8;++i){ bool lsb=crc&1; crc>>=1; if(lsb) crc^=0xA001; } }
   return crc;
 }
-void drainInput(){ while(inverterSerial.available()) inverterSerial.read(); }
+void serviceRecovery(){
+  if(otaServerStarted && WiFi.status()==WL_CONNECTED) server.handleClient();
+}
+void drainInput(){ while(inverterSerial.available()) inverterSerial.read(); serviceRecovery(); }
 void printHex(const uint8_t *data,size_t len){ for(size_t i=0;i<len;++i){ if(data[i]<0x10)Serial.print('0'); Serial.print(data[i],HEX); if(i+1<len)Serial.print(' '); } }
 size_t readFrame(uint8_t *buf,size_t capacity,uint32_t timeoutMs){
   size_t len=0; uint32_t start=millis(),lastByte=start; bool gotAny=false;
-  while(millis()-start<timeoutMs){ while(inverterSerial.available()){ int value=inverterSerial.read(); if(value>=0&&len<capacity)buf[len++]=(uint8_t)value; gotAny=true; lastByte=millis(); } if(gotAny&&millis()-lastByte>30)break; delay(1); } return len;
+  while(millis()-start<timeoutMs){
+    while(inverterSerial.available()){ int value=inverterSerial.read(); if(value>=0&&len<capacity)buf[len++]=(uint8_t)value; gotAny=true; lastByte=millis(); }
+    if(gotAny&&millis()-lastByte>30)break;
+    serviceRecovery();
+    delay(1);
+  } return len;
 }
 bool readHolding(uint8_t slave,uint16_t reg,uint16_t count){
   uint8_t request[8]={slave,0x03,(uint8_t)(reg>>8),(uint8_t)reg,(uint8_t)(count>>8),(uint8_t)count,0,0};
@@ -95,7 +103,7 @@ void runProbe(){
   bool any=false;
   for(uint32_t baud:BAUD_RATES){
     Serial.printf("\n--- baud %lu ---\n",(unsigned long)baud); inverterSerial.end(); delay(100); inverterSerial.begin(baud,SERIAL_8N1,RX_PIN,TX_PIN); delay(250);
-    for(uint8_t slave:SLAVE_IDS){ bool replied=false; for(const Probe &p:PROBES){ Serial.printf("TX slave=%u fn=03 reg=%u count=%u (%s)\n",slave,p.reg,p.count,p.name); if(readHolding(slave,p.reg,p.count)){any=true;replied=true;} delay(120); } if(replied)Serial.printf("*** Modbus response detected at baud=%lu slave=%u ***\n",(unsigned long)baud,slave); }
+    for(uint8_t slave:SLAVE_IDS){ bool replied=false; for(const Probe &p:PROBES){ Serial.printf("TX slave=%u fn=03 reg=%u count=%u (%s)\n",slave,p.reg,p.count,p.name); if(readHolding(slave,p.reg,p.count)){any=true;replied=true;} for(uint32_t waitStart=millis(); millis()-waitStart<120; ){ serviceRecovery(); delay(2); } } if(replied)Serial.printf("*** Modbus response detected at baud=%lu slave=%u ***\n",(unsigned long)baud,slave); }
   }
   Serial.println(any?"\n=== DONE: at least one valid Modbus response found ===":"\n=== DONE: no valid Modbus response on tested combinations ===");
 }
