@@ -7,7 +7,7 @@
 
 namespace {
 HardwareSerial inverterSerial(1);
-WebServer server(80);
+WebServer server(80);\nuint32_t lastWifiAttempt = 0;\nbool otaServerStarted = false;
 
 constexpr int RX_PIN = 19;
 constexpr int TX_PIN = 22;
@@ -98,16 +98,25 @@ void runProbe(){
   Serial.println(any?"\n=== DONE: at least one valid Modbus response found ===":"\n=== DONE: no valid Modbus response on tested combinations ===");
 }
 
-bool connectSavedWiFi(){
-  String ssid=readSolarString("wifiSsid0");
-  String password=readSolarString("wifiPassword0");
-  if(ssid.isEmpty()){ Serial.println("ERROR: Solar2MQTT primary Wi-Fi SSID not found in NVS."); return false; }
+bool tryNetwork(const char *ssidKey, const char *passwordKey){
+  String ssid=readSolarString(ssidKey);
+  String password=readSolarString(passwordKey);
+  if(ssid.isEmpty()) return false;
   Serial.printf("Connecting to saved Solar2MQTT Wi-Fi: %s\n",ssid.c_str());
-  WiFi.mode(WIFI_STA); WiFi.begin(ssid.c_str(),password.c_str());
+  WiFi.disconnect(true, false); delay(200); WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(),password.c_str());
   const uint32_t start=millis();
-  while(WiFi.status()!=WL_CONNECTED && millis()-start<30000){ delay(500); Serial.print('.'); }
+  while(WiFi.status()!=WL_CONNECTED && millis()-start<15000){ delay(500); Serial.print('.'); }
   Serial.println();
-  if(WiFi.status()!=WL_CONNECTED){ Serial.println("ERROR: could not connect to saved Wi-Fi."); return false; }
+  return WiFi.status()==WL_CONNECTED;
+}
+
+bool connectSavedWiFi(){
+  if(WiFi.status()==WL_CONNECTED) return true;
+  if(!tryNetwork("wifiSsid0","wifiPassword0") && !tryNetwork("wifiSsid1","wifiPassword1")){
+    Serial.println("Wi-Fi unavailable; recovery will retry automatically.");
+    return false;
+  }
   Serial.printf("Wi-Fi connected. IP: %s\n",WiFi.localIP().toString().c_str());
   if(MDNS.begin("victor-probe")) Serial.println("OTA page: http://victor-probe.local/");
   Serial.printf("OTA page: http://%s/\n",WiFi.localIP().toString().c_str());
@@ -115,7 +124,7 @@ bool connectSavedWiFi(){
 }
 
 void startRecoveryOta(){
-  if(!connectSavedWiFi()) return;
+  if(otaServerStarted || !connectSavedWiFi()) return;
   server.on("/",HTTP_GET,[](){server.send_P(200,"text/html",UPDATE_PAGE);});
   server.on("/update",HTTP_POST,
     [](){bool ok=!Update.hasError();server.send(200,"text/plain",ok?"Update successful. Rebooting...":"Update FAILED. Check serial log.");delay(500);if(ok)ESP.restart();},
@@ -123,9 +132,18 @@ void startRecoveryOta(){
       else if(u.status==UPLOAD_FILE_WRITE){if(Update.write(u.buf,u.currentSize)!=u.currentSize)Update.printError(Serial);}
       else if(u.status==UPLOAD_FILE_END){if(Update.end(true))Serial.printf("OTA success: %u bytes\n",u.totalSize);else Update.printError(Serial);}
       else if(u.status==UPLOAD_FILE_ABORTED){Update.abort();Serial.println("OTA aborted");}});
-  server.begin(); Serial.println("Recovery OTA web server started.");
+  server.begin(); otaServerStarted=true; Serial.println("Recovery OTA web server started.");
 }
 }
 
 void setup(){ Serial.begin(115200); delay(1500); runProbe(); startRecoveryOta(); }
-void loop(){ server.handleClient(); delay(2); }
+void loop(){
+  if(WiFi.status()==WL_CONNECTED){
+    if(!otaServerStarted) startRecoveryOta();
+    if(otaServerStarted) server.handleClient();
+  } else if(millis()-lastWifiAttempt>=30000){
+    lastWifiAttempt=millis();
+    startRecoveryOta();
+  }
+  delay(2);
+}
