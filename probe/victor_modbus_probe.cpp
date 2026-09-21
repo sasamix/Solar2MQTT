@@ -1,13 +1,19 @@
 #include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Update.h>
 
 namespace {
 HardwareSerial inverterSerial(1);
+WebServer server(80);
 
 constexpr int RX_PIN = 19;
 constexpr int TX_PIN = 22;
 
-// Read-only Modbus RTU probe for Victor NM-ECO-6.2KW PLUS.
-// It never sends function 0x05/0x06/0x0F/0x10 (write commands).
+// Temporary recovery AP used only by the standalone probe.
+constexpr char AP_SSID[] = "Victor-Modbus-Probe";
+constexpr char AP_PASSWORD[] = "victor6200";
+
 const uint32_t BAUD_RATES[] = {2400, 9600};
 const uint8_t SLAVE_IDS[] = {5, 1, 2, 3, 4, 6, 7, 8, 9, 10};
 
@@ -26,6 +32,17 @@ const Probe PROBES[] = {
     {100, 1, "holding register 100"},
     {200, 1, "holding register 200"},
 };
+
+const char UPDATE_PAGE[] PROGMEM = R"HTML(
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Victor Modbus Probe OTA</title></head><body>
+<h2>Victor Modbus Probe</h2>
+<p>Select a firmware.bin file to replace this probe.</p>
+<form method="POST" action="/update" enctype="multipart/form-data">
+<input type="file" name="firmware" accept=".bin,application/octet-stream" required>
+<input type="submit" value="Upload firmware">
+</form></body></html>
+)HTML";
 
 uint16_t crc16(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFF;
@@ -110,7 +127,7 @@ bool readHolding(uint8_t slave, uint16_t reg, uint16_t count) {
   }
   if (crcOk && response[0] == slave && response[1] == 0x83) {
     Serial.printf("  exception=0x%02X\n", response[2]);
-    return true; // Valid Modbus device, register may simply be unsupported.
+    return true;
   }
 
   Serial.println();
@@ -153,7 +170,56 @@ void runProbe() {
   Serial.println();
   Serial.println(anyReply ? "=== DONE: at least one valid Modbus response found ==="
                           : "=== DONE: no valid Modbus response on tested combinations ===");
-  Serial.println("Reset the ATOM to run the probe again.");
+}
+
+void startRecoveryOta() {
+  WiFi.mode(WIFI_AP);
+  if (!WiFi.softAP(AP_SSID, AP_PASSWORD)) {
+    Serial.println("ERROR: failed to start recovery Wi-Fi AP");
+    return;
+  }
+
+  Serial.println();
+  Serial.println("=== Recovery OTA enabled ===");
+  Serial.printf("Wi-Fi SSID: %s\n", AP_SSID);
+  Serial.printf("Wi-Fi password: %s\n", AP_PASSWORD);
+  Serial.printf("Open: http://%s/\n", WiFi.softAPIP().toString().c_str());
+
+  server.on("/", HTTP_GET, []() {
+    server.send_P(200, "text/html", UPDATE_PAGE);
+  });
+
+  server.on("/update", HTTP_POST,
+    []() {
+      const bool ok = !Update.hasError();
+      server.send(200, "text/plain", ok ? "Update successful. Rebooting..." : "Update FAILED. Check serial log.");
+      delay(500);
+      if (ok) ESP.restart();
+    },
+    []() {
+      HTTPUpload &upload = server.upload();
+      if (upload.status == UPLOAD_FILE_START) {
+        Serial.printf("OTA start: %s\n", upload.filename.c_str());
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+          Update.printError(Serial);
+        }
+      } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+          Update.printError(Serial);
+        }
+      } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) {
+          Serial.printf("OTA success: %u bytes\n", upload.totalSize);
+        } else {
+          Update.printError(Serial);
+        }
+      } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        Update.abort();
+        Serial.println("OTA aborted");
+      }
+    });
+
+  server.begin();
 }
 } // namespace
 
@@ -161,8 +227,10 @@ void setup() {
   Serial.begin(115200);
   delay(1500);
   runProbe();
+  startRecoveryOta();
 }
 
 void loop() {
-  delay(1000);
+  server.handleClient();
+  delay(2);
 }
