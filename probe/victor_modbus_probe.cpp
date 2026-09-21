@@ -3,14 +3,14 @@
 #include <WebServer.h>
 #include <Update.h>
 #include <Preferences.h>
-#include <ESPmDNS.h>
+#include <ESPmDNS.h>\n#include <esp_task_wdt.h>
 
 namespace {
 HardwareSerial inverterSerial(1);
 WebServer server(80);
 uint32_t lastWifiAttempt = 0;
 bool otaServerStarted = false;
-bool probeRunning = false;
+bool probeRunning = false;\nbool probeCompleted = false;
 constexpr size_t LOG_CAPACITY = 16384;
 char probeLog[LOG_CAPACITY];
 size_t probeLogLen = 0;
