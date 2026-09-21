@@ -10,6 +10,9 @@ HardwareSerial inverterSerial(1);
 WebServer server(80);
 uint32_t lastWifiAttempt = 0;
 bool otaServerStarted = false;
+bool probeRunning = false;
+String probeLog;
+constexpr size_t MAX_LOG_SIZE = 60000;
 
 constexpr int RX_PIN = 19;
 constexpr int TX_PIN = 22;
@@ -69,6 +72,11 @@ uint16_t crc16(const uint8_t *data, size_t len) {
   for(size_t pos=0;pos<len;++pos){ crc^=data[pos]; for(uint8_t i=0;i<8;++i){ bool lsb=crc&1; crc>>=1; if(lsb) crc^=0xA001; } }
   return crc;
 }
+void logLine(const String &s){
+  Serial.println(s);
+  if(probeLog.length()+s.length()+1<MAX_LOG_SIZE){ probeLog += s; probeLog += "\n"; }
+}
+String hexString(const uint8_t *data,size_t len){ String s; for(size_t i=0;i<len;++i){ if(data[i]<0x10)s+="0"; s+=String(data[i],HEX); if(i+1<len)s+=" "; } s.toUpperCase(); return s; }
 void serviceRecovery(){
   if(otaServerStarted && WiFi.status()==WL_CONNECTED) server.handleClient();
 }
@@ -88,7 +96,7 @@ bool readHolding(uint8_t slave,uint16_t reg,uint16_t count){
   uint16_t crc=crc16(request,6); request[6]=(uint8_t)crc; request[7]=(uint8_t)(crc>>8);
   drainInput(); inverterSerial.write(request,sizeof(request)); inverterSerial.flush();
   uint8_t response[96]={}; size_t len=readFrame(response,sizeof(response),700); if(!len)return false;
-  Serial.printf("  RX (%u): ",(unsigned)len); printHex(response,len);
+  String rx="  RX ("+String((unsigned)len)+"): "+hexString(response,len); logLine(rx);
   if(len<5){Serial.println("  [short/non-Modbus]");return false;}
   uint16_t received=(uint16_t)response[len-2]|((uint16_t)response[len-1]<<8);
   bool ok=received==crc16(response,len-2); Serial.printf("  [%s]",ok?"CRC OK":"CRC BAD");
@@ -97,15 +105,17 @@ bool readHolding(uint8_t slave,uint16_t reg,uint16_t count){
   Serial.println(); return false;
 }
 void runProbe(){
-  Serial.println("\n=== Victor read-only Modbus RTU probe ===");
-  Serial.println("Only function 0x03 is transmitted. No inverter settings are written.");
-  Serial.printf("UART RX=%d TX=%d\n",RX_PIN,TX_PIN);
+  probeRunning=true; probeLog="";
+  logLine("=== Victor read-only Modbus RTU probe ===");
+  logLine("Only function 0x03 is transmitted. No inverter settings are written.");
+  logLine("UART RX="+String(RX_PIN)+" TX="+String(TX_PIN));
   bool any=false;
   for(uint32_t baud:BAUD_RATES){
     Serial.printf("\n--- baud %lu ---\n",(unsigned long)baud); inverterSerial.end(); delay(100); inverterSerial.begin(baud,SERIAL_8N1,RX_PIN,TX_PIN); delay(250);
     for(uint8_t slave:SLAVE_IDS){ bool replied=false; for(const Probe &p:PROBES){ Serial.printf("TX slave=%u fn=03 reg=%u count=%u (%s)\n",slave,p.reg,p.count,p.name); if(readHolding(slave,p.reg,p.count)){any=true;replied=true;} for(uint32_t waitStart=millis(); millis()-waitStart<120; ){ serviceRecovery(); delay(2); } } if(replied)Serial.printf("*** Modbus response detected at baud=%lu slave=%u ***\n",(unsigned long)baud,slave); }
   }
-  Serial.println(any?"\n=== DONE: at least one valid Modbus response found ===":"\n=== DONE: no valid Modbus response on tested combinations ===");
+  logLine(any?"=== DONE: at least one valid Modbus response found ===":"=== DONE: no valid Modbus response on tested combinations ===");
+  probeRunning=false;
 }
 
 bool tryNetwork(const char *ssidKey, const char *passwordKey){
@@ -135,7 +145,21 @@ bool connectSavedWiFi(){
 
 void startRecoveryOta(){
   if(otaServerStarted || !connectSavedWiFi()) return;
-  server.on("/",HTTP_GET,[](){server.send_P(200,"text/html",UPDATE_PAGE);});
+  server.on("/",HTTP_GET,[](){
+    String page=F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>Victor Modbus Probe</title></head><body><h2>Victor Modbus Probe</h2>");
+    page += "<p>Status: <b>" + String(probeRunning?"RUNNING":"IDLE / COMPLETE") + "</b></p>";
+    page += F("<form method='POST' action='/rerun'><button type='submit'>Run Modbus probe again</button></form><h3>Last probe log</h3><pre style='white-space:pre-wrap;word-break:break-word;border:1px solid #aaa;padding:10px;max-height:60vh;overflow:auto'>");
+    String escaped=probeLog; escaped.replace("&","&amp;"); escaped.replace("<","&lt;"); escaped.replace(">","&gt;");
+    page += escaped;
+    page += F("</pre><p><a href='/log'>Open raw log</a></p><hr><h3>Recovery OTA</h3><p>Select Solar2MQTT firmware.bin to return to normal firmware.</p><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='firmware' accept='.bin,.ota,application/octet-stream' required><input type='submit' value='Upload firmware'></form></body></html>");
+    server.send(200,"text/html",page);
+  });
+  server.on("/log",HTTP_GET,[](){server.send(200,"text/plain",probeLog);});
+  server.on("/rerun",HTTP_POST,[](){
+    if(probeRunning){ server.send(409,"text/plain","Probe already running"); return; }
+    server.sendHeader("Location","/"); server.send(303,"text/plain","");
+    delay(100); runProbe();
+  });
   server.on("/update",HTTP_POST,
     [](){bool ok=!Update.hasError();server.send(200,"text/plain",ok?"Update successful. Rebooting...":"Update FAILED. Check serial log.");delay(500);if(ok)ESP.restart();},
     [](){HTTPUpload &u=server.upload(); if(u.status==UPLOAD_FILE_START){Serial.printf("OTA start: %s\n",u.filename.c_str());if(!Update.begin(UPDATE_SIZE_UNKNOWN))Update.printError(Serial);}
