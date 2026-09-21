@@ -138,7 +138,18 @@ void startRecoveryOta(){
 }
 }
 
-void setup(){ Serial.begin(115200); delay(1500); runProbe(); startRecoveryOta(); }
+void setup(){
+  Serial.begin(115200);
+  delay(1500);
+
+  // Recovery first: get the device back on the saved Solar2MQTT Wi-Fi
+  // and expose OTA before touching the inverter.
+  startRecoveryOta();
+
+  // Then run the read-only Modbus sweep. The web server is already bound;
+  // loop() will service it as soon as the sweep completes.
+  runProbe();
+}
 void loop(){
   if(WiFi.status()==WL_CONNECTED){
     if(!otaServerStarted) startRecoveryOta();
