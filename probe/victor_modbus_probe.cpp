@@ -11,8 +11,9 @@ WebServer server(80);
 uint32_t lastWifiAttempt = 0;
 bool otaServerStarted = false;
 bool probeRunning = false;
-String probeLog;
-constexpr size_t MAX_LOG_SIZE = 60000;
+constexpr size_t LOG_CAPACITY = 16384;
+char probeLog[LOG_CAPACITY];
+size_t probeLogLen = 0;
 
 constexpr int RX_PIN = 19;
 constexpr int TX_PIN = 22;
@@ -72,11 +73,28 @@ uint16_t crc16(const uint8_t *data, size_t len) {
   for(size_t pos=0;pos<len;++pos){ crc^=data[pos]; for(uint8_t i=0;i<8;++i){ bool lsb=crc&1; crc>>=1; if(lsb) crc^=0xA001; } }
   return crc;
 }
-void logLine(const String &s){
-  Serial.println(s);
-  if(probeLog.length()+s.length()+1<MAX_LOG_SIZE){ probeLog += s; probeLog += "\n"; }
+void appendLog(const char *s){
+  if(!s) return;
+  size_t n=strlen(s);
+  size_t room=(LOG_CAPACITY-1>probeLogLen)?(LOG_CAPACITY-1-probeLogLen):0;
+  if(n>room)n=room;
+  if(n){ memcpy(probeLog+probeLogLen,s,n); probeLogLen+=n; probeLog[probeLogLen]='\\0'; }
 }
-String hexString(const uint8_t *data,size_t len){ String s; for(size_t i=0;i<len;++i){ if(data[i]<0x10)s+="0"; s+=String(data[i],HEX); if(i+1<len)s+=" "; } s.toUpperCase(); return s; }
+void logLine(const char *s){
+  Serial.println(s);
+  appendLog(s); appendLog("\\n");
+}
+void logf(const char *fmt,...){
+  char line[256];
+  va_list ap; va_start(ap,fmt); vsnprintf(line,sizeof(line),fmt,ap); va_end(ap);
+  logLine(line);
+}
+void logHex(const uint8_t *data,size_t len){
+  char line[3*96+32]; size_t p=0;
+  p+=snprintf(line+p,sizeof(line)-p,"  RX (%u): ",(unsigned)len);
+  for(size_t i=0;i<len && p+4<sizeof(line);++i) p+=snprintf(line+p,sizeof(line)-p,"%02X%s",data[i],i+1<len?" ":"");
+  logLine(line);
+}
 void serviceRecovery(){
   if(otaServerStarted && WiFi.status()==WL_CONNECTED) server.handleClient();
 }
@@ -96,7 +114,7 @@ bool readHolding(uint8_t slave,uint16_t reg,uint16_t count){
   uint16_t crc=crc16(request,6); request[6]=(uint8_t)crc; request[7]=(uint8_t)(crc>>8);
   drainInput(); inverterSerial.write(request,sizeof(request)); inverterSerial.flush();
   uint8_t response[96]={}; size_t len=readFrame(response,sizeof(response),700); if(!len)return false;
-  String rx="  RX ("+String((unsigned)len)+"): "+hexString(response,len); logLine(rx);
+  logHex(response,len);
   if(len<5){Serial.println("  [short/non-Modbus]");return false;}
   uint16_t received=(uint16_t)response[len-2]|((uint16_t)response[len-1]<<8);
   bool ok=received==crc16(response,len-2); Serial.printf("  [%s]",ok?"CRC OK":"CRC BAD");
@@ -105,10 +123,10 @@ bool readHolding(uint8_t slave,uint16_t reg,uint16_t count){
   Serial.println(); return false;
 }
 void runProbe(){
-  probeRunning=true; probeLog="";
+  probeRunning=true; probeLogLen=0; probeLog[0]='\\0';
   logLine("=== Victor read-only Modbus RTU probe ===");
   logLine("Only function 0x03 is transmitted. No inverter settings are written.");
-  logLine("UART RX="+String(RX_PIN)+" TX="+String(TX_PIN));
+  logf("UART RX=%d TX=%d",RX_PIN,TX_PIN);
   bool any=false;
   for(uint32_t baud:BAUD_RATES){
     Serial.printf("\n--- baud %lu ---\n",(unsigned long)baud); inverterSerial.end(); delay(100); inverterSerial.begin(baud,SERIAL_8N1,RX_PIN,TX_PIN); delay(250);
@@ -149,8 +167,7 @@ void startRecoveryOta(){
     String page=F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>Victor Modbus Probe</title></head><body><h2>Victor Modbus Probe</h2>");
     page += "<p>Status: <b>" + String(probeRunning?"RUNNING":"IDLE / COMPLETE") + "</b></p>";
     page += F("<form method='POST' action='/rerun'><button type='submit'>Run Modbus probe again</button></form><h3>Last probe log</h3><pre style='white-space:pre-wrap;word-break:break-word;border:1px solid #aaa;padding:10px;max-height:60vh;overflow:auto'>");
-    String escaped=probeLog; escaped.replace("&","&amp;"); escaped.replace("<","&lt;"); escaped.replace(">","&gt;");
-    page += escaped;
+    page += probeLog;
     page += F("</pre><p><a href='/log'>Open raw log</a></p><hr><h3>Recovery OTA</h3><p>Select Solar2MQTT firmware.bin to return to normal firmware.</p><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='firmware' accept='.bin,.ota,application/octet-stream' required><input type='submit' value='Upload firmware'></form></body></html>");
     server.send(200,"text/html",page);
   });
