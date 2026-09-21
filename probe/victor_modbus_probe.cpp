@@ -3,14 +3,16 @@
 #include <WebServer.h>
 #include <Update.h>
 #include <Preferences.h>
-#include <ESPmDNS.h>\n#include <esp_task_wdt.h>
+#include <ESPmDNS.h>
+#include <esp_task_wdt.h>
 
 namespace {
 HardwareSerial inverterSerial(1);
 WebServer server(80);
 uint32_t lastWifiAttempt = 0;
 bool otaServerStarted = false;
-bool probeRunning = false;\nbool probeCompleted = false;
+bool probeRunning = false;
+bool probeCompleted = false;
 constexpr size_t LOG_CAPACITY = 16384;
 char probeLog[LOG_CAPACITY];
 size_t probeLogLen = 0;
@@ -78,11 +80,12 @@ void appendLog(const char *s){
   size_t n=strlen(s);
   size_t room=(LOG_CAPACITY-1>probeLogLen)?(LOG_CAPACITY-1-probeLogLen):0;
   if(n>room)n=room;
-  if(n){ memcpy(probeLog+probeLogLen,s,n); probeLogLen+=n; probeLog[probeLogLen]='\\0'; }
+  if(n){ memcpy(probeLog+probeLogLen,s,n); probeLogLen+=n; probeLog[probeLogLen]='\0'; }
 }
 void logLine(const char *s){
   Serial.println(s);
-  appendLog(s); appendLog("\\n");
+  appendLog(s); appendLog("\
+");
 }
 void logf(const char *fmt,...){
   char line[256];
@@ -119,18 +122,23 @@ bool readHolding(uint8_t slave,uint16_t reg,uint16_t count){
   uint16_t received=(uint16_t)response[len-2]|((uint16_t)response[len-1]<<8);
   bool ok=received==crc16(response,len-2); Serial.printf("  [%s]",ok?"CRC OK":"CRC BAD");
   if(ok&&response[0]==slave&&response[1]==0x03){Serial.println("  <-- VALID MODBUS");return true;}
-  if(ok&&response[0]==slave&&response[1]==0x83){Serial.printf("  exception=0x%02X\n",response[2]);return true;}
+  if(ok&&response[0]==slave&&response[1]==0x83){Serial.printf("  exception=0x%02X
+",response[2]);return true;}
   Serial.println(); return false;
 }
 void runProbe(){
-  probeRunning=true; probeLogLen=0; probeLog[0]='\\0';
+  probeRunning=true; probeLogLen=0; probeLog[0]='\0';
   logLine("=== Victor read-only Modbus RTU probe ===");
   logLine("Only function 0x03 is transmitted. No inverter settings are written.");
   logf("UART RX=%d TX=%d",RX_PIN,TX_PIN);
   bool any=false;
   for(uint32_t baud:BAUD_RATES){
-    Serial.printf("\n--- baud %lu ---\n",(unsigned long)baud); inverterSerial.end(); delay(100); inverterSerial.begin(baud,SERIAL_8N1,RX_PIN,TX_PIN); delay(250);
-    for(uint8_t slave:SLAVE_IDS){ bool replied=false; for(const Probe &p:PROBES){ Serial.printf("TX slave=%u fn=03 reg=%u count=%u (%s)\n",slave,p.reg,p.count,p.name); if(readHolding(slave,p.reg,p.count)){any=true;replied=true;} for(uint32_t waitStart=millis(); millis()-waitStart<120; ){ serviceRecovery(); delay(2); } } if(replied)Serial.printf("*** Modbus response detected at baud=%lu slave=%u ***\n",(unsigned long)baud,slave); }
+    Serial.printf("
+--- baud %lu ---
+",(unsigned long)baud); inverterSerial.end(); delay(100); inverterSerial.begin(baud,SERIAL_8N1,RX_PIN,TX_PIN); delay(250);
+    for(uint8_t slave:SLAVE_IDS){ bool replied=false; for(const Probe &p:PROBES){ Serial.printf("TX slave=%u fn=03 reg=%u count=%u (%s)
+",slave,p.reg,p.count,p.name); if(readHolding(slave,p.reg,p.count)){any=true;replied=true;} for(uint32_t waitStart=millis(); millis()-waitStart<120; ){ serviceRecovery(); delay(2); } } if(replied)Serial.printf("*** Modbus response detected at baud=%lu slave=%u ***
+",(unsigned long)baud,slave); }
   }
   logLine(any?"=== DONE: at least one valid Modbus response found ===":"=== DONE: no valid Modbus response on tested combinations ===");
   probeRunning=false;
@@ -140,7 +148,8 @@ bool tryNetwork(const char *ssidKey, const char *passwordKey){
   String ssid=readSolarString(ssidKey);
   String password=readSolarString(passwordKey);
   if(ssid.isEmpty()) return false;
-  Serial.printf("Connecting to saved Solar2MQTT Wi-Fi: %s\n",ssid.c_str());
+  Serial.printf("Connecting to saved Solar2MQTT Wi-Fi: %s
+",ssid.c_str());
   WiFi.disconnect(true, false); delay(200); WiFi.mode(WIFI_STA);
   WiFi.begin(ssid.c_str(),password.c_str());
   const uint32_t start=millis();
@@ -155,9 +164,11 @@ bool connectSavedWiFi(){
     Serial.println("Wi-Fi unavailable; recovery will retry automatically.");
     return false;
   }
-  Serial.printf("Wi-Fi connected. IP: %s\n",WiFi.localIP().toString().c_str());
+  Serial.printf("Wi-Fi connected. IP: %s
+",WiFi.localIP().toString().c_str());
   if(MDNS.begin("victor-probe")) Serial.println("OTA page: http://victor-probe.local/");
-  Serial.printf("OTA page: http://%s/\n",WiFi.localIP().toString().c_str());
+  Serial.printf("OTA page: http://%s/
+",WiFi.localIP().toString().c_str());
   return true;
 }
 
@@ -179,9 +190,11 @@ void startRecoveryOta(){
   });
   server.on("/update",HTTP_POST,
     [](){bool ok=!Update.hasError();server.send(200,"text/plain",ok?"Update successful. Rebooting...":"Update FAILED. Check serial log.");delay(500);if(ok)ESP.restart();},
-    [](){HTTPUpload &u=server.upload(); if(u.status==UPLOAD_FILE_START){Serial.printf("OTA start: %s\n",u.filename.c_str());if(!Update.begin(UPDATE_SIZE_UNKNOWN))Update.printError(Serial);}
+    [](){HTTPUpload &u=server.upload(); if(u.status==UPLOAD_FILE_START){Serial.printf("OTA start: %s
+",u.filename.c_str());if(!Update.begin(UPDATE_SIZE_UNKNOWN))Update.printError(Serial);}
       else if(u.status==UPLOAD_FILE_WRITE){if(Update.write(u.buf,u.currentSize)!=u.currentSize)Update.printError(Serial);}
-      else if(u.status==UPLOAD_FILE_END){if(Update.end(true))Serial.printf("OTA success: %u bytes\n",u.totalSize);else Update.printError(Serial);}
+      else if(u.status==UPLOAD_FILE_END){if(Update.end(true))Serial.printf("OTA success: %u bytes
+",u.totalSize);else Update.printError(Serial);}
       else if(u.status==UPLOAD_FILE_ABORTED){Update.abort();Serial.println("OTA aborted");}});
   server.begin(); otaServerStarted=true; Serial.println("Recovery OTA web server started.");
 }
