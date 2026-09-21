@@ -7,7 +7,9 @@
 
 namespace {
 HardwareSerial inverterSerial(1);
-WebServer server(80);\nuint32_t lastWifiAttempt = 0;\nbool otaServerStarted = false;
+WebServer server(80);
+uint32_t lastWifiAttempt = 0;
+bool otaServerStarted = false;
 
 constexpr int RX_PIN = 19;
 constexpr int TX_PIN = 22;
