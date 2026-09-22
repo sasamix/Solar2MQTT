@@ -9,7 +9,7 @@ namespace {
 HardwareSerial inverterSerial(1);
 WebServer server(80);
 uint32_t lastWifiAttempt = 0;
-bool otaServerStarted = false;
+bool otaServerStarted = false;\nbool probeRequested = false;\nbool probeRunning = false;\nString probeLog;\nconstexpr size_t MAX_PROBE_LOG = 24000;
 
 constexpr int RX_PIN = 19;
 constexpr int TX_PIN = 22;
@@ -136,6 +136,18 @@ bool connectSavedWiFi(){
 void startRecoveryOta(){
   if(otaServerStarted || !connectSavedWiFi()) return;
   server.on("/",HTTP_GET,[](){server.send_P(200,"text/html",UPDATE_PAGE);});
+  server.on("/log",HTTP_GET,[](){
+    String body="Victor Modbus Probe\n\n";
+    body+=probeRunning?"STATUS: RUNNING\n":(probeRequested?"STATUS: QUEUED\n":"STATUS: IDLE\n");
+    body+=probeLog;
+    server.send(200,"text/plain; charset=utf-8",body);
+  });
+  server.on("/run",HTTP_POST,[](){
+    if(probeRunning||probeRequested){server.send(409,"text/plain","Probe already running or queued.");return;}
+    probeRequested=true;
+    server.sendHeader("Location","/log");
+    server.send(303,"text/plain","Queued");
+  });
   server.on("/update",HTTP_POST,
     [](){bool ok=!Update.hasError();server.send(200,"text/plain",ok?"Update successful. Rebooting...":"Update FAILED. Check serial log.");delay(500);if(ok)ESP.restart();},
     [](){HTTPUpload &u=server.upload(); if(u.status==UPLOAD_FILE_START){Serial.printf("OTA start: %s\n",u.filename.c_str());if(!Update.begin(UPDATE_SIZE_UNKNOWN))Update.printError(Serial);}
@@ -160,7 +172,7 @@ void setup(){
 void loop(){
   if(WiFi.status()==WL_CONNECTED){
     if(!otaServerStarted) startRecoveryOta();
-    if(otaServerStarted) server.handleClient();
+    if(otaServerStarted) server.handleClient();\n    if(probeRequested && !probeRunning){ probeRequested=false; runProbe(); }
   } else if(millis()-lastWifiAttempt>=30000){
     lastWifiAttempt=millis();
     startRecoveryOta();
