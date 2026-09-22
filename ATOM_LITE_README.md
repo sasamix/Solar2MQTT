@@ -5,8 +5,8 @@ Target hardware:
 - M5Stack ATOMIC RS232 Base (MAX232, full duplex)
 
 UART mapping for the ATOMIC RS232 Base:
-- Inverter RX (ESP32 receives): GPIO19
-- Inverter TX (ESP32 transmits): GPIO22
+- Inverter RX (ESP32 receives): GPIO22
+- Inverter TX (ESP32 transmits): GPIO19
 - DE/RE: disabled (-1), not used by RS232
 
 Other mapping:
