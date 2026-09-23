@@ -56,6 +56,12 @@ void MODBUS::loop()
         return;
     }
 
+    if (_powmrDumpRunning)
+    {
+        previousTime = millis();
+        return;
+    }
+
     if (millis() - previousTime < kCommandDelayMs)
     {
         return;
@@ -94,6 +100,80 @@ void MODBUS::loop()
 void MODBUS::callback(std::function<void()> func)
 {
     requestCallback = func;
+}
+
+void MODBUS::powmrDumpTask(void *param)
+{
+    MODBUS *self = static_cast<MODBUS *>(param);
+    self->runPowmrDump();
+    self->_powmrDumpTask = nullptr;
+    vTaskDelete(nullptr);
+}
+
+void MODBUS::runPowmrDump()
+{
+    String answer;
+    answer.reserve(9000);
+    answer = "POWMR_DUMP BEGIN ranges=4500-4565,5000-5099\n";
+
+    uint16_t readable = 0;
+    uint16_t failed = 0;
+    const uint16_t oldTimeout = _mCom.getResponseTimeout();
+    _mCom.setResponseTimeout(250);
+    _mCom.clearReadCache();
+
+    ModbusMaster *mb = _mCom.getModbusMaster();
+
+    auto scanRange = [&](uint16_t first, uint16_t last) {
+        for (uint16_t reg = first; reg <= last; ++reg)
+        {
+            const uint8_t result = mb->readHoldingRegisters(reg, 1);
+            if (result == mb->ku8MBSuccess)
+            {
+                const uint16_t raw = mb->getResponseBuffer(0);
+                const uint16_t swapped = static_cast<uint16_t>((raw >> 8) | (raw << 8));
+                char line[72];
+                snprintf(line, sizeof(line),
+                         "reg=%u raw=%u swap=%u hex=0x%04X\n",
+                         static_cast<unsigned int>(reg),
+                         static_cast<unsigned int>(raw),
+                         static_cast<unsigned int>(swapped),
+                         static_cast<unsigned int>(raw));
+                answer += line;
+                readable++;
+            }
+            else
+            {
+                char line[36];
+                snprintf(line, sizeof(line), "reg=%u X result=%u\n",
+                         static_cast<unsigned int>(reg),
+                         static_cast<unsigned int>(result));
+                answer += line;
+                failed++;
+            }
+
+            vTaskDelay(1);
+        }
+    };
+
+    scanRange(4500, 4565);
+    scanRange(5000, 5099);
+
+    answer += "POWMR_DUMP END readable=";
+    answer += readable;
+    answer += " failed=";
+    answer += failed;
+
+    _mCom.setResponseTimeout(oldTimeout);
+    _mCom.clearReadCache();
+
+    _powmrDumpResult = answer;
+    _powmrDumpReady = true;
+    _powmrDumpRunning = false;
+
+    writeLog("POWMR_DUMP async complete readable=%u failed=%u",
+             static_cast<unsigned int>(readable),
+             static_cast<unsigned int>(failed));
 }
 
 String MODBUS::requestData(String command)
@@ -204,95 +284,37 @@ String MODBUS::requestData(String command)
         return answer;
     }
 
-    // Read-only full PowMr/Victor diagnostic dump.
-    // Syntax: powmr dump
-    // Scans the relevant register windows and returns every readable register
-    // directly in CommandAnswer. It also mirrors the same values to writeLog().
+    // Read-only asynchronous PowMr/Victor diagnostic dump.
+    // Start with "powmr dump"; retrieve later with "powmr dump result".
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command == "powmr dump result")
+    {
+        if (_powmrDumpRunning)
+            return "RUNNING: PowMr dump is still collecting registers";
+        if (!_powmrDumpReady)
+            return "NO RESULT: start with 'powmr dump'";
+        return _powmrDumpResult;
+    }
+
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
         command == "powmr dump")
     {
-        uint16_t readable = 0;
-        uint16_t failed = 0;
-        String answer;
-        answer.reserve(8192);
-        answer = "POWMR_DUMP BEGIN ranges=4500-4565,5000-5099\n";
+        if (_powmrDumpRunning)
+            return "RUNNING: PowMr dump already started";
 
-        auto appendValue = [&](uint16_t reg, uint16_t raw) {
-            const uint16_t swapped = static_cast<uint16_t>((raw >> 8) | (raw << 8));
-            char line[72];
-            snprintf(line, sizeof(line),
-                     "reg=%u raw=%u swap=%u hex=0x%04X\n",
-                     static_cast<unsigned int>(reg),
-                     static_cast<unsigned int>(raw),
-                     static_cast<unsigned int>(swapped),
-                     static_cast<unsigned int>(raw));
-            answer += line;
-            writeLog("POWMR_DUMP %s", line);
-            readable++;
-        };
+        _powmrDumpReady = false;
+        _powmrDumpResult = "";
+        _powmrDumpRunning = true;
 
-        auto appendUnreadable = [&](uint16_t reg) {
-            char line[40];
-            snprintf(line, sizeof(line), "reg=%u unreadable\n",
-                     static_cast<unsigned int>(reg));
-            answer += line;
-            writeLog("POWMR_DUMP %s", line);
-            failed++;
-        };
+        TaskHandle_t handle = nullptr;
+        if (xTaskCreate(powmrDumpTask, "powmr_dump", 8192, this, 1, &handle) != pdPASS)
+        {
+            _powmrDumpRunning = false;
+            return "ERROR: failed to start PowMr dump task";
+        }
 
-        auto dumpRange = [&](uint16_t first, uint16_t last) {
-            const uint16_t chunkSize = 10;
-            uint16_t values[chunkSize] = {};
-
-            for (uint16_t rangeStart = first; rangeStart <= last;
-                 rangeStart = static_cast<uint16_t>(rangeStart + chunkSize))
-            {
-                const uint16_t count = static_cast<uint16_t>(
-                    min<uint32_t>(chunkSize, static_cast<uint32_t>(last - rangeStart + 1)));
-
-                _mCom.clearReadCache();
-                if (_mCom.readHoldingBlock(rangeStart, count, values, chunkSize))
-                {
-                    for (uint16_t i = 0; i < count; ++i)
-                    {
-                        appendValue(static_cast<uint16_t>(rangeStart + i), values[i]);
-                    }
-                    continue;
-                }
-
-                // If one address breaks a block read, retry each register alone
-                // so readable neighbours are still included.
-                for (uint16_t reg = rangeStart;
-                     reg < static_cast<uint16_t>(rangeStart + count);
-                     ++reg)
-                {
-                    uint16_t value = 0;
-                    _mCom.clearReadCache();
-                    if (_mCom.readHoldingBlock(reg, 1, &value, 1))
-                    {
-                        appendValue(reg, value);
-                    }
-                    else
-                    {
-                        appendUnreadable(reg);
-                    }
-                }
-            }
-        };
-
-        dumpRange(4500, 4565);
-        dumpRange(5000, 5099);
-
-        answer += "POWMR_DUMP END readable=";
-        answer += readable;
-        answer += " failed=";
-        answer += failed;
-
-        writeLog("POWMR_DUMP END readable=%u failed=%u",
-                 static_cast<unsigned int>(readable),
-                 static_cast<unsigned int>(failed));
-
-        return answer;
+        _powmrDumpTask = handle;
+        return "STARTED: PowMr dump is running; use 'powmr dump result' in about 45 seconds";
     }
 
     // SOC threshold writes are intentionally disabled until the exact Victor
