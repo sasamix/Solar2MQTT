@@ -752,10 +752,6 @@ function renderStatus(data) {
     data.EspData?.detect_protocol_name ||
     data.protocol ||
     "";
-  const powmrBatteryTypeSection = byId("powmrBatteryTypeSection");
-  if (powmrBatteryTypeSection) {
-    powmrBatteryTypeSection.hidden = activeProtocol !== "MODBUS_POWMR";
-  }
   const batteryType = pickDataValue(data, ["Battery_Type"], ["DeviceData"]);
   setText("batteryTypeCurrent", batteryType || "-");
   const batteryTypeSelect = byId("batteryTypeSelect");
