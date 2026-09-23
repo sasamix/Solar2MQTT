@@ -133,58 +133,47 @@ String MODBUS::requestData(String command)
         return String("OK: Max charging current = ") + amps + " A";
     }
 
-    // Victor/PowMr lithium SBU controls.
-    // In lithium/BMS mode menu 12/13 are SOC thresholds. On this family
-    // the writable mirrors are 5025/5026 and values are whole percentages.
+    // Safe read-only Victor/PowMr register diagnostics.
+    // Syntax: powmr read <start> <count>. Restrict to the 5000-series
+    // control/config area and never perform writes from this command.
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
-        command.startsWith("powmr output "))
+        command.startsWith("powmr read "))
     {
-        String mode = command.substring(13);
-        mode.toLowerCase();
-        int value = -1;
-        if (mode == "utility") value = 0;
-        else if (mode == "solar") value = 1;
-        else if (mode == "sbu") value = 2;
-        if (value < 0)
-            return "ERROR: allowed output mode is utility/solar/sbu";
+        String args = command.substring(11);
+        args.trim();
+        const int split = args.indexOf(' ');
+        if (split <= 0)
+            return "ERROR: syntax powmr read <start> <count>";
+        const int start = args.substring(0, split).toInt();
+        const int count = args.substring(split + 1).toInt();
+        if (start < 5000 || start > 5099 || count < 1 || count > 20 ||
+            start + count - 1 > 5099)
+            return "ERROR: diagnostic range must stay within 5000..5099, max 20 registers";
 
-        if (!_mCom.writeHoldingRegister(5018, static_cast<uint16_t>(value)))
-        {
-            const uint8_t result = _mCom.getLastWriteResult();
-            return String("ERROR: Modbus write failed result=") +
-                   static_cast<unsigned int>(result) + " (" +
-                   _mCom.getLastWriteResultText() + ")";
-        }
+        uint16_t values[20] = {};
         _mCom.clearReadCache();
-        static_info.curr_register = 0;
-        return String("OK: Output source priority = ") + mode;
+        if (!_mCom.readHoldingBlock(static_cast<uint16_t>(start),
+                                    static_cast<uint16_t>(count),
+                                    values, 20))
+            return "ERROR: Modbus diagnostic read failed";
+
+        String answer = "OK:";
+        for (int i = 0; i < count; ++i)
+        {
+            answer += " ";
+            answer += String(start + i);
+            answer += "=";
+            answer += String(values[i]);
+        }
+        return answer;
     }
 
-    const bool isBackUtilitySoc = command.startsWith("powmr backutility ");
-    const bool isBackBatterySoc = command.startsWith("powmr backbattery ");
+    // SOC threshold writes are intentionally disabled until the exact Victor
+    // lithium/BMS registers and encoding are confirmed by read-only diagnostics.
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
-        (isBackUtilitySoc || isBackBatterySoc))
-    {
-        const int soc = command.substring(18).toInt();
-        if (isBackUtilitySoc && (soc < 5 || soc > 50 || (soc % 5) != 0))
-            return "ERROR: back-to-utility SOC must be 5..50% in 5% steps";
-        if (isBackBatterySoc && (soc < 60 || soc > 100 || (soc % 5) != 0))
-            return "ERROR: back-to-battery SOC must be 60..100% in 5% steps";
-
-        const uint16_t reg = isBackUtilitySoc ? 5025 : 5026;
-        if (!_mCom.writeHoldingRegister(reg, static_cast<uint16_t>(soc)))
-        {
-            const uint8_t result = _mCom.getLastWriteResult();
-            return String("ERROR: Modbus write failed result=") +
-                   static_cast<unsigned int>(result) + " (" +
-                   _mCom.getLastWriteResultText() + ")";
-        }
-        _mCom.clearReadCache();
-        static_info.curr_register = 0;
-        requestStaticData = true;
-        return String("OK: ") + (isBackUtilitySoc ? "Back to utility SOC = " : "Back to battery SOC = ") +
-               String(soc) + "%";
-    }
+        (command.startsWith("powmr backutility ") ||
+         command.startsWith("powmr backbattery ")))
+        return "ERROR: SBU SOC writes disabled until registers are verified";
 
     writeLog("Custom Modbus command unsupported: %s", command.c_str());
     return "UNSUPPORTED";
