@@ -752,6 +752,10 @@ function renderStatus(data) {
     data.EspData?.detect_protocol_name ||
     data.protocol ||
     "";
+  const powmrBatteryTypeSection = byId("powmrBatteryTypeSection");
+  if (powmrBatteryTypeSection) {
+    powmrBatteryTypeSection.hidden = activeProtocol !== "MODBUS_POWMR";
+  }
   const batteryType = pickDataValue(data, ["Battery_Type"], ["DeviceData"]);
   setText("batteryTypeCurrent", batteryType || "-");
   const batteryTypeSelect = byId("batteryTypeSelect");
@@ -1176,6 +1180,27 @@ window.addEventListener("DOMContentLoaded", async () => {
       showNotice("SOC history loaded.");
     } else {
       showNotice("SOC history command sent. No answer received yet.", true);
+    }
+  });
+
+  bindClick("piTempsBtn", async () => {
+    const body = new URLSearchParams();
+    body.set("command", "powmr pitemps");
+    await fetchJson("/api/command", { method: "POST", body });
+    const data = await waitForCommandAnswer();
+    const answer = data.RawData?.CommandAnswer || "-";
+    setText("commandAnswer", answer);
+    const preview = byId("dataPreview");
+    if (preview) {
+      preview.textContent = JSON.stringify(data || {}, null, 2);
+    }
+    setText("dataPreviewMeta", `Last updated: ${new Date().toLocaleTimeString("en-GB")}`);
+    if (answer.startsWith("OK:")) {
+      showNotice(answer);
+    } else if (answer && answer !== "-") {
+      showNotice(answer, true);
+    } else {
+      showNotice("PI temperature probe sent. No answer received yet.", true);
     }
   });
 
