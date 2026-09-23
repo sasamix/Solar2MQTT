@@ -99,6 +99,37 @@ void MODBUS::callback(std::function<void()> func)
 String MODBUS::requestData(String command)
 {
     requestStaticData = true;
+    command.trim();
+
+    // Guarded first write command for PowMr/Victor.
+    // Syntax: powmr charge <amps>
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command.startsWith("powmr charge "))
+    {
+        const String valueText = command.substring(13);
+        const int amps = valueText.toInt();
+        const bool allowed = amps == 10 || amps == 20 || amps == 30 ||
+                             amps == 40 || amps == 50 || amps == 60;
+        if (!allowed)
+        {
+            return "ERROR: allowed charge current is 10/20/30/40/50/60 A";
+        }
+
+        // Register 4541 is byte-swapped on the PowMr map.
+        const uint16_t value = static_cast<uint16_t>(amps);
+        const uint16_t rawValue = static_cast<uint16_t>((value >> 8) | (value << 8));
+
+        if (!_mCom.writeHoldingRegister(4541, rawValue))
+        {
+            return "ERROR: Modbus write failed";
+        }
+
+        _mCom.clearReadCache();
+        static_info.curr_register = 0;
+        requestStaticData = true;
+        return String("OK: Max charging current = ") + amps + " A";
+    }
+
     writeLog("Custom Modbus command unsupported: %s", command.c_str());
     return "UNSUPPORTED";
 }
