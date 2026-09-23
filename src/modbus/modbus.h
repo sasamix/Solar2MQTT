@@ -3,6 +3,8 @@
 
 #include <HardwareSerial.h>
 #include <ArduinoJson.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "modbus_com.h"
 #include "device/modbus_device.h"
 #include "device/must_pv_ph18/must_pv_ph18.h"
@@ -66,6 +68,8 @@ private:
 
     void prepareRegisters();
     void stabilizeSerial();
+    static void powmrDumpTask(void *param);
+    void runPowmrDump();
 
     /**
      * @brief Serial interface used for communication
