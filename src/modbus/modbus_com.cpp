@@ -135,6 +135,7 @@ bool MODBUS_COM::readHoldingBlock(uint16_t startRegister, uint16_t registerCount
 bool MODBUS_COM::writeHoldingRegister(uint16_t registerId, uint16_t rawValue)
 {
     clearReadCache();
+    _lastWriteResult = 0;
 
     for (uint8_t i = 0; i < MODBUS_RETRIES; ++i)
     {
@@ -142,6 +143,7 @@ bool MODBUS_COM::writeHoldingRegister(uint16_t registerId, uint16_t rawValue)
         _mb.clearTransmitBuffer();
         _mb.setTransmitBuffer(0, rawValue);
         const uint8_t result = _mb.writeMultipleRegisters(registerId, 1);
+        _lastWriteResult = result;
         if (result == _mb.ku8MBSuccess)
         {
             writeLog("Modbus holding write OK reg=%u raw=%u",
@@ -159,6 +161,16 @@ bool MODBUS_COM::writeHoldingRegister(uint16_t registerId, uint16_t rawValue)
     }
 
     return false;
+}
+
+uint8_t MODBUS_COM::getLastWriteResult() const
+{
+    return _lastWriteResult;
+}
+
+const char *MODBUS_COM::getLastWriteResultText() const
+{
+    return getModbusResultText(_lastWriteResult);
 }
 
 void MODBUS_COM::clearReadCache()
