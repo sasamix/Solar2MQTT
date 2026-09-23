@@ -54,6 +54,7 @@ public:
      * @details sends the command over the specified serial connection
      */
     String requestData(String command);
+    bool isDiagnosticBusy() const { return _powmrDumpRunning; }
 
 private:
     static constexpr unsigned long kCommandDelayMs = 200;
