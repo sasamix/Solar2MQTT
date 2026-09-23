@@ -80,21 +80,13 @@
     </form>
 
     <div class="panel" id="victorSbuPanel">
-      <div class="detailSplitter">Victor / PowMr SBU</div>
-      <div class="kv"><span class="k">Back to utility SOC</span><span class="v" id="sbuUtilitySoc">-</span></div>
-      <div class="kv"><span class="k">Back to battery SOC</span><span class="v" id="sbuBatterySoc">-</span></div>
-      <form id="sbuUtilityForm" class="command-row">
-        <label for="sbuUtilityInput">Grid SOC [%]</label>
-        <input id="sbuUtilityInput" type="number" min="5" max="50" step="5" required>
-        <button type="submit" class="btn">Set grid SOC</button>
-      </form>
-      <form id="sbuBatteryForm" class="command-row">
-        <label for="sbuBatteryInput">Battery SOC [%]</label>
-        <input id="sbuBatteryInput" type="number" min="60" max="100" step="5" required>
-        <button type="submit" class="btn">Set battery SOC</button>
-      </form>
-      <p class="field-note">Lithium/BMS mode only. Values are written to the inverter and then read back over Modbus.</p>
-      <div class="kv"><span class="k">Last command</span><span class="v" id="sbuCommandAnswer">-</span></div>
+      <div class="detailSplitter">Victor / PowMr SBU diagnostic</div>
+      <p class="field-note">Current inverter reference values: Grid 30%, Battery 70%. Read-only diagnostic; SBU writes are disabled until the exact registers are verified.</p>
+      <div class="kv"><span class="k">Expected Grid SOC</span><span class="v">30%</span></div>
+      <div class="kv"><span class="k">Expected Battery SOC</span><span class="v">70%</span></div>
+      <div class="kv"><span class="k">Voltage mirror 4544</span><span class="v" id="sbuUtilitySoc">-</span></div>
+      <div class="kv"><span class="k">Voltage mirror 4545</span><span class="v" id="sbuBatterySoc">-</span></div>
+      <p class="field-note">Use Debug command: <code>powmr read 5000 20</code>, then 5020, 5040, 5060 and 5080. These commands only read registers.</p>
     </div>
 
     <div class="panel">
