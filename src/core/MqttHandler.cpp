@@ -1,6 +1,7 @@
 #include "core/MqttHandler.h"
 
 #include <ArduinoJson.h>
+#include <initializer_list>
 #include <WiFi.h>
 
 #include "core/SettingsPrefs.h"
@@ -46,6 +47,43 @@ void appendTopicIfMissing(std::vector<String> &topics, const String &topic)
     {
         topics.push_back(topic);
     }
+}
+
+bool isPowMrWritableSettingKey(const char *key)
+{
+    if (key == nullptr)
+    {
+        return false;
+    }
+
+    const char *const keys[] = {
+        DESCR_Charger_Source_Priority,
+        DESCR_Output_Source_Priority,
+        DESCR_Input_Voltage_Range,
+        "Battery_Type",
+        DESCR_AC_Out_Rating_Frequency,
+        DESCR_Current_Max_Charging_Current,
+        DESCR_AC_Out_Rating_Voltage,
+        DESCR_Current_Max_AC_Charging_Current,
+        DESCR_Battery_Recharge_Voltage,
+        DESCR_Battery_Redischarge_Voltage,
+        DESCR_Battery_Bulk_Voltage,
+        DESCR_Battery_Float_Voltage,
+        DESCR_Battery_Under_Voltage,
+        "Battery_Equalization_Voltage",
+        "Battery_Equalization_Time",
+        "Battery_Equalization_Timeout",
+        "Battery_Equalization_Interval",
+    };
+
+    for (const char *candidate : keys)
+    {
+        if (strcmp(key, candidate) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool isDiscoverableValue(JsonVariantConst value)
@@ -593,6 +631,13 @@ void MqttHandler::publishHaSection(JsonDocument &snapshot,
         }
 
         const char *key = entry.key().c_str();
+        const char *activeProtocol = snapshot["Status"]["protocol"] | "";
+        if (strcmp(stateSection, "DeviceData") == 0 &&
+            strcmp(activeProtocol, "MODBUS_POWMR") == 0 &&
+            isPowMrWritableSettingKey(key))
+        {
+            continue;
+        }
         const HaEntityDescriptor *descriptor = findDescriptor(key, descriptors, descriptorCount);
         const bool binarySensor = value.is<bool>();
         const char *component = binarySensor ? "binary_sensor" : "sensor";
