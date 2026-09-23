@@ -752,10 +752,29 @@ function renderStatus(data) {
     data.EspData?.detect_protocol_name ||
     data.protocol ||
     "";
-  const powmrBatteryTypeSection = byId("powmrBatteryTypeSection");
-  if (powmrBatteryTypeSection) {
-    powmrBatteryTypeSection.hidden = activeProtocol !== "MODBUS_POWMR";
+  const powmrControlsSection = byId("powmrControlsSection");
+  if (powmrControlsSection) {
+    powmrControlsSection.hidden = activeProtocol !== "MODBUS_POWMR";
   }
+  const outputPriority = pickDataValue(data, ["Output_Source_Priority"], ["DeviceData"]);
+  const outputModeMap = {
+    "Utility first": "UTI",
+    "Solar first": "SUB",
+    "SBU priority": "SBU",
+    UTI: "UTI",
+    SUB: "SUB",
+    SBU: "SBU",
+  };
+  const outputMode = outputModeMap[String(outputPriority || "")] || String(outputPriority || "");
+  setText("outputModeCurrent", outputMode || "-");
+  const outputModeSelect = byId("outputModeSelect");
+  if (outputModeSelect && outputMode && document.activeElement !== outputModeSelect) {
+    const desired = "powmr outputmode " + outputMode;
+    if (Array.from(outputModeSelect.options).some((option) => option.value === desired)) {
+      outputModeSelect.value = desired;
+    }
+  }
+
   const batteryType = pickDataValue(data, ["Battery_Type"], ["DeviceData"]);
   setText("batteryTypeCurrent", batteryType || "-");
   const batteryTypeSelect = byId("batteryTypeSelect");
@@ -1062,6 +1081,26 @@ window.addEventListener("DOMContentLoaded", async () => {
   bindSubmit("deviceForm", async (form) => {
     const result = await postForm("/api/settings/device", form);
     showNotice(result?.message || "Device settings applied.");
+  });
+
+  bindClick("outputModeApplyBtn", async () => {
+    const select = byId("outputModeSelect");
+    if (!select) {
+      throw new Error("Output mode selector is unavailable.");
+    }
+    const body = new URLSearchParams();
+    body.set("command", select.value);
+    await fetchJson("/api/command", { method: "POST", body });
+    const data = await waitForCommandAnswer();
+    const answer = data.RawData?.CommandAnswer || "";
+    if (answer.startsWith("OK:")) {
+      showNotice(answer);
+      await loadStatus();
+    } else if (answer) {
+      showNotice(answer, true);
+    } else {
+      showNotice("Output mode command sent. No answer received yet.", true);
+    }
   });
 
   bindClick("batteryTypeApplyBtn", async () => {
