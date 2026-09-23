@@ -483,6 +483,78 @@ String MODBUS::requestData(String command)
         return answer;
     }
 
+
+    // PowMr/Victor output source priority (menu 01).
+    // Read:  powmr outputmode
+    // Write: powmr outputmode UTI|SUB|SBU
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        (command == "powmr outputmode" || command.startsWith("powmr outputmode ")))
+    {
+        if (_powmrDumpRunning)
+            return "ERROR: wait for PowMr diagnostic scan to finish before changing output mode";
+
+        auto modeName = [](uint16_t value) -> const char * {
+            switch (value)
+            {
+            case 0: return "UTI";
+            case 1: return "SUB";
+            case 2: return "SBU";
+            default: return "UNKNOWN";
+            }
+        };
+
+        if (command == "powmr outputmode")
+        {
+            uint16_t value = 0xFFFF;
+            _mCom.clearReadCache();
+            if (!_mCom.readHoldingBlock(5018, 1, &value, 1))
+                return "ERROR: unable to read output mode register 5018";
+
+            return String("OK: Output mode = ") + modeName(value) +
+                   " (" + static_cast<unsigned int>(value) + ")";
+        }
+
+        String requested = command.substring(17);
+        requested.trim();
+        requested.toUpperCase();
+
+        int value = -1;
+        if (requested == "UTI") value = 0;
+        else if (requested == "SUB") value = 1;
+        else if (requested == "SBU") value = 2;
+
+        if (value < 0)
+            return "ERROR: output mode must be UTI/SUB/SBU";
+
+        if (!_mCom.writeHoldingRegister(5018, static_cast<uint16_t>(value)))
+        {
+            const uint8_t result = _mCom.getLastWriteResult();
+            return String("ERROR: output mode write failed result=") +
+                   static_cast<unsigned int>(result) + " (" +
+                   _mCom.getLastWriteResultText() + ")";
+        }
+
+        delay(150);
+        uint16_t readback = 0xFFFF;
+        _mCom.clearReadCache();
+        const bool readOk = _mCom.readHoldingBlock(5018, 1, &readback, 1);
+
+        static_info.curr_register = 0;
+        requestStaticData = true;
+
+        if (!readOk)
+            return String("OK: Output mode write accepted: ") + requested +
+                   "; readback unavailable";
+
+        if (readback != static_cast<uint16_t>(value))
+            return String("ERROR: output mode readback mismatch requested=") +
+                   requested + " actual=" + modeName(readback) +
+                   " (" + static_cast<unsigned int>(readback) + ")";
+
+        return String("OK: Output mode = ") + modeName(readback) +
+               " (" + static_cast<unsigned int>(readback) + ")";
+    }
+
     // PowMr/Victor battery type (menu 05).
     // Read:  powmr batterytype
     // Write: powmr batterytype AGM|FLD|USE|LIB|LIC|LIP|LIL
