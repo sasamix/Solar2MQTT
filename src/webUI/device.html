@@ -86,7 +86,25 @@
       <div class="kv"><span class="k">Expected Battery SOC</span><span class="v">70%</span></div>
       <div class="kv"><span class="k">Voltage mirror 4544</span><span class="v" id="sbuUtilitySoc">-</span></div>
       <div class="kv"><span class="k">Voltage mirror 4545</span><span class="v" id="sbuBatterySoc">-</span></div>
-      <p class="field-note">Use Debug command: <code>powmr read 5000 20</code>, then 5020, 5040, 5060 and 5080. These commands only read registers.</p>
+
+      <div class="detailSplitter">Battery type / BMS protocol</div>
+      <div class="kv"><span class="k">Current battery type</span><span class="v" id="batteryTypeCurrent">-</span></div>
+      <form id="batteryTypeForm">
+        <label for="batteryTypeSelect">Program 05</label>
+        <select id="batteryTypeSelect" name="command">
+          <option value="powmr batterytype AGM">AGM</option>
+          <option value="powmr batterytype FLD">FLD</option>
+          <option value="powmr batterytype USE">USE</option>
+          <option value="powmr batterytype LIB">LIB — lithium, no BMS protocol</option>
+          <option value="powmr batterytype LIC">LIC — PACE RS232</option>
+          <option value="powmr batterytype LIP">LIP — PACE RS485</option>
+          <option value="powmr batterytype LIL">LIL — PYLON RS485</option>
+        </select>
+        <p class="field-note">Changing this setting changes the inverter BMS communication protocol. For the current PYLON RS485 setup use LIL.</p>
+        <button type="submit" class="btn">Apply battery type</button>
+      </form>
+
+      <p class="field-note">Wide read-only scan: <code>powmr dump</code>, then use <code>powmr dump result</code> to see progress/result. The scan checks 4566–4999 and 5100–5500 and reports only readable registers.</p>
     </div>
 
     <div class="panel">
