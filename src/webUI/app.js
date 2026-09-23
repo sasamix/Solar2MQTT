@@ -752,38 +752,6 @@ function renderStatus(data) {
     data.EspData?.detect_protocol_name ||
     data.protocol ||
     "";
-  const powmrControlsSection = byId("powmrControlsSection");
-  if (powmrControlsSection) {
-    powmrControlsSection.hidden = activeProtocol !== "MODBUS_POWMR";
-  }
-  const outputPriority = pickDataValue(data, ["Output_Source_Priority"], ["DeviceData"]);
-  const outputModeMap = {
-    "Utility first": "UTI",
-    "Solar first": "SUB",
-    "SBU priority": "SBU",
-    UTI: "UTI",
-    SUB: "SUB",
-    SBU: "SBU",
-  };
-  const outputMode = outputModeMap[String(outputPriority || "")] || String(outputPriority || "");
-  setText("outputModeCurrent", outputMode || "-");
-  const outputModeSelect = byId("outputModeSelect");
-  if (outputModeSelect && outputMode && document.activeElement !== outputModeSelect) {
-    const desired = "powmr outputmode " + outputMode;
-    if (Array.from(outputModeSelect.options).some((option) => option.value === desired)) {
-      outputModeSelect.value = desired;
-    }
-  }
-
-  const batteryType = pickDataValue(data, ["Battery_Type"], ["DeviceData"]);
-  setText("batteryTypeCurrent", batteryType || "-");
-  const batteryTypeSelect = byId("batteryTypeSelect");
-  if (batteryTypeSelect && batteryType && document.activeElement !== batteryTypeSelect) {
-    const desired = "powmr batterytype " + String(batteryType).toUpperCase();
-    if (Array.from(batteryTypeSelect.options).some((option) => option.value === desired)) {
-      batteryTypeSelect.value = desired;
-    }
-  }
   setText("metricPvPower", formatValue(totalSolarPower(data), " W"));
   setText("metricBatteryPercent", formatValue(data.LiveData?.Battery_Percent, " %"));
   setText("metricBatteryVoltage", formatValue(data.LiveData?.Battery_Voltage ?? data.LiveData?.Positive_Battery_Voltage, " V"));
@@ -1083,45 +1051,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     showNotice(result?.message || "Device settings applied.");
   });
 
-  bindClick("outputModeApplyBtn", async () => {
-    const select = byId("outputModeSelect");
-    if (!select) {
-      throw new Error("Output mode selector is unavailable.");
-    }
-    const body = new URLSearchParams();
-    body.set("command", select.value);
-    await fetchJson("/api/command", { method: "POST", body });
-    const data = await waitForCommandAnswer();
-    const answer = data.RawData?.CommandAnswer || "";
-    if (answer.startsWith("OK:")) {
-      showNotice(answer);
-      await loadStatus();
-    } else if (answer) {
-      showNotice(answer, true);
-    } else {
-      showNotice("Output mode command sent. No answer received yet.", true);
-    }
-  });
 
-  bindClick("batteryTypeApplyBtn", async () => {
-    const select = byId("batteryTypeSelect");
-    if (!select) {
-      throw new Error("Battery type selector is unavailable.");
-    }
-    const body = new URLSearchParams();
-    body.set("command", select.value);
-    await fetchJson("/api/command", { method: "POST", body });
-    const data = await waitForCommandAnswer();
-    const answer = data.RawData?.CommandAnswer || "";
-    if (answer.startsWith("OK:")) {
-      showNotice(answer);
-      await loadStatus();
-    } else if (answer) {
-      showNotice(answer, true);
-    } else {
-      showNotice("Battery type command sent. No answer received yet.", true);
-    }
-  });
+
+
 
 
   bindSubmit("commandForm", async (form) => {
