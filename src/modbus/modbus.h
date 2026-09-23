@@ -70,6 +70,8 @@ private:
     void stabilizeSerial();
     static void powmrDumpTask(void *param);
     void runPowmrDump();
+    void capturePowmrSocSample();
+    String buildPowmrSocDiag() const;
 
     /**
      * @brief Serial interface used for communication
@@ -88,6 +90,23 @@ private:
     volatile uint16_t _powmrDumpFailed = 0;
     String _powmrDumpResult;
     TaskHandle_t _powmrDumpTask = nullptr;
+
+    struct PowMrSocSample
+    {
+        uint32_t uptimeSeconds = 0;
+        uint16_t batteryDeciVolts = 0;
+        uint8_t socPercent = 0;
+        uint16_t chargeAmps = 0;
+        uint16_t dischargeAmps = 0;
+        bool valid = false;
+    };
+
+    static constexpr uint8_t kPowMrSocHistorySize = 72;
+    static constexpr uint32_t kPowMrSocSampleIntervalMs = 5UL * 60UL * 1000UL;
+    PowMrSocSample _powmrSocHistory[kPowMrSocHistorySize] = {};
+    uint8_t _powmrSocHistoryHead = 0;
+    uint8_t _powmrSocHistoryCount = 0;
+    unsigned long _powmrSocLastSampleMs = 0;
 };
 
 #endif
