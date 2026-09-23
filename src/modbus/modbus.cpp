@@ -168,6 +168,77 @@ String MODBUS::requestData(String command)
         return answer;
     }
 
+    // Read-only full PowMr/Victor diagnostic dump.
+    // Syntax: powmr dump
+    // Scans the two relevant register windows and writes every readable
+    // register to the Solar2MQTT log as raw and byte-swapped values.
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command == "powmr dump")
+    {
+        uint16_t readable = 0;
+        uint16_t failed = 0;
+
+        auto logValue = [&](uint16_t reg, uint16_t raw) {
+            const uint16_t swapped = static_cast<uint16_t>((raw >> 8) | (raw << 8));
+            writeLog("POWMR_DUMP reg=%u raw=%u swap=%u hex=0x%04X",
+                     static_cast<unsigned int>(reg),
+                     static_cast<unsigned int>(raw),
+                     static_cast<unsigned int>(swapped),
+                     static_cast<unsigned int>(raw));
+            readable++;
+        };
+
+        auto dumpRange = [&](uint16_t first, uint16_t last) {
+            const uint16_t chunkSize = 10;
+            uint16_t values[chunkSize] = {};
+
+            for (uint16_t start = first; start <= last; start = static_cast<uint16_t>(start + chunkSize))
+            {
+                const uint16_t count = static_cast<uint16_t>(
+                    min<uint32_t>(chunkSize, static_cast<uint32_t>(last - start + 1)));
+
+                _mCom.clearReadCache();
+                if (_mCom.readHoldingBlock(start, count, values, chunkSize))
+                {
+                    for (uint16_t i = 0; i < count; ++i)
+                    {
+                        logValue(static_cast<uint16_t>(start + i), values[i]);
+                    }
+                    continue;
+                }
+
+                // A block can fail because just one address is unsupported.
+                // Fall back to single-register reads so valid neighbours are
+                // still captured in the dump.
+                for (uint16_t reg = start; reg < static_cast<uint16_t>(start + count); ++reg)
+                {
+                    uint16_t value = 0;
+                    _mCom.clearReadCache();
+                    if (_mCom.readHoldingBlock(reg, 1, &value, 1))
+                    {
+                        logValue(reg, value);
+                    }
+                    else
+                    {
+                        writeLog("POWMR_DUMP reg=%u unreadable",
+                                 static_cast<unsigned int>(reg));
+                        failed++;
+                    }
+                }
+            }
+        };
+
+        writeLog("POWMR_DUMP BEGIN ranges=4500-4565,5000-5099");
+        dumpRange(4500, 4565);
+        dumpRange(5000, 5099);
+        writeLog("POWMR_DUMP END readable=%u failed=%u",
+                 static_cast<unsigned int>(readable),
+                 static_cast<unsigned int>(failed));
+
+        return String("OK: PowMr dump written to log; readable=") +
+               readable + " failed=" + failed;
+    }
+
     // SOC threshold writes are intentionally disabled until the exact Victor
     // lithium/BMS registers and encoding are confirmed by read-only diagnostics.
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
