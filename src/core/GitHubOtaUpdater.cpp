@@ -467,9 +467,6 @@ int GitHubOtaUpdater::compareVersions(const String &left, const String &right)
 
     while (leftIndex < normalizedLeft.length() || rightIndex < normalizedRight.length())
     {
-        long leftNumber = 0;
-        long rightNumber = 0;
-
         while (leftIndex < normalizedLeft.length() && !isDigit(normalizedLeft[leftIndex]))
         {
             leftIndex++;
@@ -478,6 +475,14 @@ int GitHubOtaUpdater::compareVersions(const String &left, const String &right)
         {
             rightIndex++;
         }
+
+        if (leftIndex >= normalizedLeft.length() || rightIndex >= normalizedRight.length())
+        {
+            break;
+        }
+
+        long leftNumber = 0;
+        long rightNumber = 0;
         while (leftIndex < normalizedLeft.length() && isDigit(normalizedLeft[leftIndex]))
         {
             leftNumber = leftNumber * 10 + (normalizedLeft[leftIndex] - '0');
@@ -489,17 +494,32 @@ int GitHubOtaUpdater::compareVersions(const String &left, const String &right)
             rightIndex++;
         }
 
-        if (leftNumber < rightNumber)
-        {
-            return -1;
-        }
-        if (leftNumber > rightNumber)
-        {
-            return 1;
-        }
+        if (leftNumber < rightNumber) return -1;
+        if (leftNumber > rightNumber) return 1;
     }
 
-    return 0;
+    // Diagnostic releases use a trailing letter:
+    // 2.0.14 < 2.0.14A < 2.0.14B.
+    auto trailingLetters = [](const String &version) -> String {
+        int end = version.length() - 1;
+        while (end >= 0 && isAlpha(version[end]))
+        {
+            end--;
+        }
+        String suffix = version.substring(end + 1);
+        suffix.toUpperCase();
+        return suffix;
+    };
+
+    const String leftSuffix = trailingLetters(normalizedLeft);
+    const String rightSuffix = trailingLetters(normalizedRight);
+
+    if (leftSuffix == rightSuffix) return 0;
+    if (leftSuffix.length() == 0) return -1;
+    if (rightSuffix.length() == 0) return 1;
+
+    const int lexical = leftSuffix.compareTo(rightSuffix);
+    return lexical < 0 ? -1 : (lexical > 0 ? 1 : 0);
 }
 
 void GitHubOtaUpdater::lock() const
