@@ -1176,6 +1176,25 @@ window.addEventListener("DOMContentLoaded", async () => {
     showNotice("JSON data loaded.");
   });
 
+  bindClick("socDiagBtn", async () => {
+    const body = new URLSearchParams();
+    body.set("command", "powmr socdiag");
+    await fetchJson("/api/command", { method: "POST", body });
+    const data = await waitForCommandAnswer();
+    const answer = data.RawData?.CommandAnswer || "-";
+    setText("commandAnswer", answer);
+    const preview = byId("dataPreview");
+    if (preview) {
+      preview.textContent = JSON.stringify(data || {}, null, 2);
+    }
+    setText("dataPreviewMeta", `Last updated: ${new Date().toLocaleTimeString("en-GB")}`);
+    if (answer && answer !== "-") {
+      showNotice("SOC history loaded.");
+    } else {
+      showNotice("SOC history command sent. No answer received yet.", true);
+    }
+  });
+
   bindClick("rebootBtn", async () => {
     await fetchJson("/api/reboot", { method: "POST" });
     showNotice("Reboot triggered.");
