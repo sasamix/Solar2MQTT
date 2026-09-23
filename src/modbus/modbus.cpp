@@ -121,7 +121,10 @@ String MODBUS::requestData(String command)
 
         if (!_mCom.writeHoldingRegister(4541, rawValue))
         {
-            return "ERROR: Modbus write failed";
+            const uint8_t result = _mCom.getLastWriteResult();
+            return String("ERROR: Modbus write failed result=") +
+                   static_cast<unsigned int>(result) + " (" +
+                   _mCom.getLastWriteResultText() + ")";
         }
 
         _mCom.clearReadCache();
