@@ -31,6 +31,8 @@ public:
     void setResponseTimeout(uint16_t timeoutMs);
     bool readHoldingBlock(uint16_t startRegister, uint16_t registerCount, uint16_t *buffer, size_t bufferLen);
     bool writeHoldingRegister(uint16_t registerId, uint16_t rawValue);
+    uint8_t getLastWriteResult() const;
+    const char *getLastWriteResultText() const;
     void clearReadCache();
 
 private:
@@ -56,6 +58,7 @@ private:
     uint16_t _cacheStartRegister = 0;
     uint16_t _cacheRegisterCount = 0;
     uint16_t _cacheValues[MAX_HOLDING_BLOCK_WORDS] = {};
+    uint8_t _lastWriteResult = 0;
 };
 
 #endif
