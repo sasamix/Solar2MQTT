@@ -132,6 +132,35 @@ bool MODBUS_COM::readHoldingBlock(uint16_t startRegister, uint16_t registerCount
     return true;
 }
 
+bool MODBUS_COM::writeHoldingRegister(uint16_t registerId, uint16_t rawValue)
+{
+    clearReadCache();
+
+    for (uint8_t i = 0; i < MODBUS_RETRIES; ++i)
+    {
+        // PowMr uses Modbus function 0x10 even for a single holding register.
+        _mb.clearTransmitBuffer();
+        _mb.setTransmitBuffer(0, rawValue);
+        const uint8_t result = _mb.writeMultipleRegisters(registerId, 1);
+        if (result == _mb.ku8MBSuccess)
+        {
+            writeLog("Modbus holding write OK reg=%u raw=%u",
+                     static_cast<unsigned int>(registerId),
+                     static_cast<unsigned int>(rawValue));
+            return true;
+        }
+
+        writeLog("Modbus holding write failed reg=%u raw=%u result=%u (%s)",
+                 static_cast<unsigned int>(registerId),
+                 static_cast<unsigned int>(rawValue),
+                 static_cast<unsigned int>(result),
+                 getModbusResultText(result));
+        waitBeforeRetry(i);
+    }
+
+    return false;
+}
+
 void MODBUS_COM::clearReadCache()
 {
     _cacheValid = false;
