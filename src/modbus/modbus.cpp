@@ -119,7 +119,7 @@ String MODBUS::requestData(String command)
         const uint16_t value = static_cast<uint16_t>(amps);
         const uint16_t rawValue = static_cast<uint16_t>((value >> 8) | (value << 8));
 
-        if (!_mCom.writeHoldingRegister(4541, rawValue))
+        if (!_mCom.writeHoldingRegister(5022, rawValue))
         {
             const uint8_t result = _mCom.getLastWriteResult();
             return String("ERROR: Modbus write failed result=") +
