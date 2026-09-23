@@ -554,6 +554,7 @@ void MqttHandler::publishHaDiscovery(bool force)
                      force);
     publishHaEspInternalTemperature(snapshot, snapshot["EspData"].as<JsonObjectConst>(), currentTopics, force);
     publishHaDs18b20(snapshot, snapshot["LiveData"].as<JsonObjectConst>(), currentTopics, force);
+    publishHaPowMrSettings(snapshot, snapshot["DeviceData"].as<JsonObjectConst>(), currentTopics, force);
 
     if (!force)
     {
@@ -730,6 +731,155 @@ void MqttHandler::publishHaDs18b20(JsonDocument &snapshot, JsonObjectConst liveV
         _mqtt.publish(topic.c_str(), payload.c_str(), true);
         appendTopicIfMissing(_haDiscoveryTopics, topic);
     }
+}
+
+void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
+                                          JsonObjectConst deviceValues,
+                                          std::vector<String> &currentTopics,
+                                          bool force)
+{
+    JsonObjectConst status = snapshot["Status"].as<JsonObjectConst>();
+    const char *protocol = status["protocol"] | "";
+    if (strcmp(protocol, "MODBUS_POWMR") != 0)
+    {
+        return;
+    }
+
+    const String topicBase = baseTopic();
+    const String deviceId = getHaDeviceId();
+    const String availabilityTopic = topicBase + "/Alive";
+    const String commandTopic = topicBase + "/DeviceControl/Set_Command";
+
+    auto publishSelect = [&](const char *key,
+                             const char *name,
+                             std::initializer_list<const char *> options,
+                             const char *commandTemplate)
+    {
+        JsonVariantConst state = deviceValues[key];
+        if (!isDiscoverableValue(state))
+        {
+            return;
+        }
+
+        const String topic = buildDiscoveryTopic(deviceId, "select", key);
+        appendTopicIfMissing(currentTopics, topic);
+        if (!force && hasHaDiscoveryTopic(topic))
+        {
+            return;
+        }
+
+        JsonDocument doc;
+        doc["name"] = name;
+        doc["state_topic"] = topicBase + "/DeviceData/" + key;
+        doc["command_topic"] = commandTopic;
+        doc["command_template"] = commandTemplate;
+        doc["availability_topic"] = availabilityTopic;
+        doc["payload_available"] = "true";
+        doc["payload_not_available"] = "false";
+        doc["unique_id"] = buildUniqueId(deviceId, "PowMrSetting", key);
+        doc["icon"] = "mdi:tune-variant";
+        doc["qos"] = 1;
+
+        JsonArray opts = doc["options"].to<JsonArray>();
+        for (const char *option : options)
+        {
+            opts.add(option);
+        }
+
+        populateDeviceInfo(doc, snapshot);
+
+        String payload;
+        serializeJson(doc, payload);
+        _mqtt.publish(topic.c_str(), payload.c_str(), true);
+        appendTopicIfMissing(_haDiscoveryTopics, topic);
+    };
+
+    auto publishNumber = [&](const char *key,
+                             const char *name,
+                             const char *settingName,
+                             float minValue,
+                             float maxValue,
+                             float step,
+                             const char *unit)
+    {
+        JsonVariantConst state = deviceValues[key];
+        if (!isDiscoverableValue(state))
+        {
+            return;
+        }
+
+        const String topic = buildDiscoveryTopic(deviceId, "number", key);
+        appendTopicIfMissing(currentTopics, topic);
+        if (!force && hasHaDiscoveryTopic(topic))
+        {
+            return;
+        }
+
+        JsonDocument doc;
+        doc["name"] = name;
+        doc["state_topic"] = topicBase + "/DeviceData/" + key;
+        doc["command_topic"] = commandTopic;
+        doc["command_template"] = String("powmr setting ") + settingName + " {{ value }}";
+        doc["availability_topic"] = availabilityTopic;
+        doc["payload_available"] = "true";
+        doc["payload_not_available"] = "false";
+        doc["unique_id"] = buildUniqueId(deviceId, "PowMrSetting", key);
+        doc["icon"] = "mdi:tune";
+        doc["min"] = minValue;
+        doc["max"] = maxValue;
+        doc["step"] = step;
+        doc["mode"] = "box";
+        doc["qos"] = 1;
+        if (unit != nullptr && unit[0] != '\0')
+        {
+            doc["unit_of_measurement"] = unit;
+        }
+
+        populateDeviceInfo(doc, snapshot);
+
+        String payload;
+        serializeJson(doc, payload);
+        _mqtt.publish(topic.c_str(), payload.c_str(), true);
+        appendTopicIfMissing(_haDiscoveryTopics, topic);
+    };
+
+    publishSelect(DESCR_Output_Source_Priority,
+                  "Output Source Priority",
+                  {"Utility first", "Solar first", "SBU priority"},
+                  "{% if value == 'Utility first' %}powmr outputmode UTI{% elif value == 'Solar first' %}powmr outputmode SUB{% else %}powmr outputmode SBU{% endif %}");
+
+    publishSelect(DESCR_Charger_Source_Priority,
+                  "Charger Source Priority",
+                  {"Utility first", "Solar first", "Solar and Utility", "Solar only"},
+                  "{% if value == 'Utility first' %}powmr setting chargerpriority UTILITY{% elif value == 'Solar first' %}powmr setting chargerpriority SOLAR{% elif value == 'Solar and Utility' %}powmr setting chargerpriority SOLAR_UTILITY{% else %}powmr setting chargerpriority SOLAR_ONLY{% endif %}");
+
+    publishSelect(DESCR_Input_Voltage_Range,
+                  "AC Input Voltage Range",
+                  {"Appliances", "UPS"},
+                  "{% if value == 'UPS' %}powmr setting inputrange UPS{% else %}powmr setting inputrange APL{% endif %}");
+
+    publishSelect("Battery_Type",
+                  "Battery Type / BMS Protocol",
+                  {"AGM", "FLD", "USE", "LIB", "LIC", "LIP", "LIL"},
+                  "powmr batterytype {{ value }}");
+
+    publishSelect(DESCR_AC_Out_Rating_Frequency,
+                  "AC Output Frequency",
+                  {"50", "60"},
+                  "powmr setting outputfreq {{ value }}");
+
+    publishNumber(DESCR_Current_Max_Charging_Current, "Max Charging Current", "maxcharge", 0, 120, 1, "A");
+    publishNumber(DESCR_AC_Out_Rating_Voltage, "AC Output Voltage", "outputvoltage", 220, 240, 10, "V");
+    publishNumber(DESCR_Current_Max_AC_Charging_Current, "Max Utility Charging Current", "utilitycharge", 0, 120, 1, "A");
+    publishNumber(DESCR_Battery_Recharge_Voltage, "Battery Recharge Voltage", "recharge", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber(DESCR_Battery_Redischarge_Voltage, "Battery Redischarge Voltage", "redischarge", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber(DESCR_Battery_Bulk_Voltage, "Battery Bulk Voltage", "bulk", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber(DESCR_Battery_Float_Voltage, "Battery Float Voltage", "float", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber(DESCR_Battery_Under_Voltage, "Battery Cutoff Voltage", "cutoff", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber("Battery_Equalization_Voltage", "Battery Equalization Voltage", "equalizationvoltage", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber("Battery_Equalization_Time", "Battery Equalization Time", "equalizationtime", 0, 999, 1, "min");
+    publishNumber("Battery_Equalization_Timeout", "Battery Equalization Timeout", "equalizationtimeout", 0, 999, 1, "min");
+    publishNumber("Battery_Equalization_Interval", "Battery Equalization Interval", "equalizationinterval", 0, 999, 1, "d");
 }
 
 bool MqttHandler::hasHaDiscoveryTopic(const String &topic) const
