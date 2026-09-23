@@ -170,73 +170,93 @@ String MODBUS::requestData(String command)
 
     // Read-only full PowMr/Victor diagnostic dump.
     // Syntax: powmr dump
-    // Scans the two relevant register windows and writes every readable
-    // register to the Solar2MQTT log as raw and byte-swapped values.
+    // Scans the relevant register windows and returns every readable register
+    // directly in CommandAnswer. It also mirrors the same values to writeLog().
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
         command == "powmr dump")
     {
         uint16_t readable = 0;
         uint16_t failed = 0;
+        String answer;
+        answer.reserve(8192);
+        answer = "POWMR_DUMP BEGIN ranges=4500-4565,5000-5099\n";
 
-        auto logValue = [&](uint16_t reg, uint16_t raw) {
+        auto appendValue = [&](uint16_t reg, uint16_t raw) {
             const uint16_t swapped = static_cast<uint16_t>((raw >> 8) | (raw << 8));
-            writeLog("POWMR_DUMP reg=%u raw=%u swap=%u hex=0x%04X",
+            char line[72];
+            snprintf(line, sizeof(line),
+                     "reg=%u raw=%u swap=%u hex=0x%04X\n",
                      static_cast<unsigned int>(reg),
                      static_cast<unsigned int>(raw),
                      static_cast<unsigned int>(swapped),
                      static_cast<unsigned int>(raw));
+            answer += line;
+            writeLog("POWMR_DUMP %s", line);
             readable++;
+        };
+
+        auto appendUnreadable = [&](uint16_t reg) {
+            char line[40];
+            snprintf(line, sizeof(line), "reg=%u unreadable\n",
+                     static_cast<unsigned int>(reg));
+            answer += line;
+            writeLog("POWMR_DUMP %s", line);
+            failed++;
         };
 
         auto dumpRange = [&](uint16_t first, uint16_t last) {
             const uint16_t chunkSize = 10;
             uint16_t values[chunkSize] = {};
 
-            for (uint16_t start = first; start <= last; start = static_cast<uint16_t>(start + chunkSize))
+            for (uint16_t rangeStart = first; rangeStart <= last;
+                 rangeStart = static_cast<uint16_t>(rangeStart + chunkSize))
             {
                 const uint16_t count = static_cast<uint16_t>(
-                    min<uint32_t>(chunkSize, static_cast<uint32_t>(last - start + 1)));
+                    min<uint32_t>(chunkSize, static_cast<uint32_t>(last - rangeStart + 1)));
 
                 _mCom.clearReadCache();
-                if (_mCom.readHoldingBlock(start, count, values, chunkSize))
+                if (_mCom.readHoldingBlock(rangeStart, count, values, chunkSize))
                 {
                     for (uint16_t i = 0; i < count; ++i)
                     {
-                        logValue(static_cast<uint16_t>(start + i), values[i]);
+                        appendValue(static_cast<uint16_t>(rangeStart + i), values[i]);
                     }
                     continue;
                 }
 
-                // A block can fail because just one address is unsupported.
-                // Fall back to single-register reads so valid neighbours are
-                // still captured in the dump.
-                for (uint16_t reg = start; reg < static_cast<uint16_t>(start + count); ++reg)
+                // If one address breaks a block read, retry each register alone
+                // so readable neighbours are still included.
+                for (uint16_t reg = rangeStart;
+                     reg < static_cast<uint16_t>(rangeStart + count);
+                     ++reg)
                 {
                     uint16_t value = 0;
                     _mCom.clearReadCache();
                     if (_mCom.readHoldingBlock(reg, 1, &value, 1))
                     {
-                        logValue(reg, value);
+                        appendValue(reg, value);
                     }
                     else
                     {
-                        writeLog("POWMR_DUMP reg=%u unreadable",
-                                 static_cast<unsigned int>(reg));
-                        failed++;
+                        appendUnreadable(reg);
                     }
                 }
             }
         };
 
-        writeLog("POWMR_DUMP BEGIN ranges=4500-4565,5000-5099");
         dumpRange(4500, 4565);
         dumpRange(5000, 5099);
+
+        answer += "POWMR_DUMP END readable=";
+        answer += readable;
+        answer += " failed=";
+        answer += failed;
+
         writeLog("POWMR_DUMP END readable=%u failed=%u",
                  static_cast<unsigned int>(readable),
                  static_cast<unsigned int>(failed));
 
-        return String("OK: PowMr dump written to log; readable=") +
-               readable + " failed=" + failed;
+        return answer;
     }
 
     // SOC threshold writes are intentionally disabled until the exact Victor
