@@ -92,35 +92,7 @@
       </div>
     </div>
 
-    <div id="powmrControlsSection" class="panel" hidden>
-      <div class="detailSplitter">PowMr / Victor Controls</div>
 
-      <div class="detailSplitter">Output Mode</div>
-      <div class="kv"><span class="k">Current</span><span class="v" id="outputModeCurrent">-</span></div>
-      <label for="outputModeSelect">Program 01</label>
-      <select id="outputModeSelect">
-        <option value="powmr outputmode UTI">UTI — Utility first</option>
-        <option value="powmr outputmode SUB">SUB — Solar → Utility → Battery</option>
-        <option value="powmr outputmode SBU">SBU — Solar → Battery → Utility</option>
-      </select>
-      <p class="field-note">Changes output source priority through register 5018 with readback verification.</p>
-      <button id="outputModeApplyBtn" type="button" class="btn">Apply output mode</button>
-
-      <div class="detailSplitter">Battery Type / BMS Protocol</div>
-      <div class="kv"><span class="k">Current</span><span class="v" id="batteryTypeCurrent">-</span></div>
-      <label for="batteryTypeSelect">Program 05</label>
-      <select id="batteryTypeSelect">
-        <option value="powmr batterytype AGM">AGM</option>
-        <option value="powmr batterytype FLD">FLD</option>
-        <option value="powmr batterytype USE">USE</option>
-        <option value="powmr batterytype LIB">LIB — lithium, no BMS protocol</option>
-        <option value="powmr batterytype LIC">LIC — PACE RS232</option>
-        <option value="powmr batterytype LIP">LIP — PACE RS485</option>
-        <option value="powmr batterytype LIL">LIL — PYLON RS485</option>
-      </select>
-      <p class="field-note">Remote Program 05 control for PowMr/Victor. Current setup uses PYLON over RS485, so keep LIL unless the BMS protocol is intentionally changed.</p>
-      <button id="batteryTypeApplyBtn" type="button" class="btn">Apply battery type</button>
-    </div>
   </div>
 
   <div id="toast"><span id="toast-icon">i</span><span id="toast-msg"></span></div>
