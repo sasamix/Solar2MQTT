@@ -245,17 +245,6 @@ const OVERVIEW_GROUPS = [
     ],
   },
   {
-    title: "PowMr raw",
-    fields: [
-      { label: "4556", keys: ["PowMr_Debug_4556"], decimals: 0 },
-      { label: "4557", keys: ["Inverter_Temperature"], decimals: 0 },
-      { label: "4558", keys: ["PowMr_Debug_4558"], decimals: 0 },
-      { label: "4559", keys: ["PowMr_Debug_4559"], decimals: 0 },
-      { label: "4560", keys: ["PowMr_Debug_4560"], decimals: 0 },
-      { label: "4561", keys: ["PowMr_Debug_4561"], decimals: 0 },
-    ],
-  },
-  {
     title: "Inverter",
     fields: [
       { label: "Mode", keys: ["Inverter_Operation_Mode"], numeric: false },
@@ -763,9 +752,9 @@ function renderStatus(data) {
     data.EspData?.detect_protocol_name ||
     data.protocol ||
     "";
-  const victorSbuPanel = byId("victorSbuPanel");
-  if (victorSbuPanel) {
-    victorSbuPanel.hidden = activeProtocol !== "MODBUS_POWMR";
+  const powmrBatteryTypeSection = byId("powmrBatteryTypeSection");
+  if (powmrBatteryTypeSection) {
+    powmrBatteryTypeSection.hidden = activeProtocol !== "MODBUS_POWMR";
   }
   const batteryType = pickDataValue(data, ["Battery_Type"], ["DeviceData"]);
   setText("batteryTypeCurrent", batteryType || "-");
@@ -781,14 +770,6 @@ function renderStatus(data) {
   setText("metricBatteryVoltage", formatValue(data.LiveData?.Battery_Voltage ?? data.LiveData?.Positive_Battery_Voltage, " V"));
   if (data.RawData && Object.prototype.hasOwnProperty.call(data.RawData, "CommandAnswer")) {
     setText("commandAnswer", data.RawData.CommandAnswer || "-");
-    const utilitySoc = pickDataValue(data, ["Battery_Recharge_Voltage"], ["DeviceData"]);
-    const batterySoc = pickDataValue(data, ["Battery_Redischarge_Voltage"], ["DeviceData"]);
-    setText("sbuUtilitySoc", utilitySoc !== null ? utilitySoc + " V" : "-");
-    setText("sbuBatterySoc", batterySoc !== null ? batterySoc + " V" : "-");
-    const utilityInput = byId("sbuUtilityInput");
-    const batteryInput = byId("sbuBatteryInput");
-    if (utilityInput && utilitySoc !== null && document.activeElement !== utilityInput) utilityInput.value = utilitySoc;
-    if (batteryInput && batterySoc !== null && document.activeElement !== batteryInput) batteryInput.value = batterySoc;
   }
 
   renderOverview(data);
@@ -1083,8 +1064,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     showNotice(result?.message || "Device settings applied.");
   });
 
-  bindSubmit("batteryTypeForm", async (form) => {
-    await postForm("/api/command", form);
+  bindClick("batteryTypeApplyBtn", async () => {
+    const select = byId("batteryTypeSelect");
+    if (!select) {
+      throw new Error("Battery type selector is unavailable.");
+    }
+    const body = new URLSearchParams();
+    body.set("command", select.value);
+    await fetchJson("/api/command", { method: "POST", body });
     const data = await waitForCommandAnswer();
     const answer = data.RawData?.CommandAnswer || "";
     if (answer.startsWith("OK:")) {
@@ -1096,6 +1083,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       showNotice("Battery type command sent. No answer received yet.", true);
     }
   });
+
 
   bindSubmit("commandForm", async (form) => {
     await postForm("/api/command", form);
