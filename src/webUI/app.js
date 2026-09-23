@@ -251,7 +251,14 @@ const OVERVIEW_GROUPS = [
       { label: "Charge", keys: ["Inverter_Charge_State"], numeric: false },
     ],
   },
-];
+,
+  {
+    title: "SBU thresholds",
+    fields: [
+      { label: "Grid", keys: ["Battery_Back_To_Utility_SOC"], unit: "%", decimals: 0 },
+      { label: "Battery", keys: ["Battery_Back_To_Battery_SOC"], unit: "%", decimals: 0 },
+    ],
+  }];
 
 function isDataValuePresent(value) {
   if (value === null || value === undefined) {
