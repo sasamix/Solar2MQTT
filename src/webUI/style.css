@@ -774,12 +774,59 @@ select option {
 }
 
 @media (max-width: 520px) {
+  body {
+    padding: 6px;
+  }
+
   #container {
-    padding: 8px;
+    padding: 4px;
+    max-width: 100%;
+  }
+
+  #header {
+    margin: 6px 0 10px;
+    gap: 7px;
+  }
+
+  #logo {
+    width: 24px;
+    height: 24px;
   }
 
   h1 {
-    font-size: 1.3rem;
+    font-size: 1.18rem;
+  }
+
+  .statusbar {
+    padding: 8px 10px 15px;
+    gap: 8px;
+  }
+
+  .statusbar svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .status-version-overlay {
+    bottom: 2px;
+  }
+
+  .status-version-overlay [data-role="version"] {
+    font-size: 8px;
+  }
+
+  .status-version-overlay [data-role="build"] {
+    display: none;
+  }
+
+  .panel {
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+
+  .detailSplitter {
+    margin: 8px 0 10px;
+    font-size: 10px;
   }
 
   .button-row,
@@ -790,6 +837,75 @@ select option {
   }
 
   .meter-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .value-meter {
+    min-height: 94px;
+    padding: 9px;
+    gap: 7px;
+  }
+
+  .meter-head {
+    gap: 5px;
+  }
+
+  .meter-head span {
+    font-size: 0.67rem;
+  }
+
+  .meter-head strong {
+    font-size: 1.05rem;
+  }
+
+  .meter-meta {
+    min-height: 1.3em;
+    font-size: 0.69rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .meter-progress {
+    height: 12px;
+  }
+
+  .meter-bar {
+    padding-right: 4px;
+    font-size: 0.62rem;
+  }
+
+  .overview-list {
+    gap: 7px;
+  }
+
+  .overview-row {
+    grid-template-columns: minmax(72px, 92px) minmax(0, 1fr);
+    padding: 9px 10px;
+    gap: 6px;
+  }
+
+  .overview-label {
+    font-size: 0.92rem;
+  }
+
+  .overview-values {
+    gap: 4px;
+  }
+
+  .value-chip {
+    padding: 4px 6px;
+  }
+
+  .value-chip small,
+  .value-chip strong {
+    font-size: 0.76rem;
+  }
+
+  button,
+  .btn {
+    padding: 10px 12px;
+    font-size: 15px;
   }
 }
