@@ -87,7 +87,14 @@ void MODBUS::loop()
     connection = connectionCounter < MAX_CONNECTION_ATTEMPTS;
     if (_mCom.isAllRegistersRead(*cur_info_registers))
     {
+        const bool completedLivePass = (cur_info_registers == &live_info);
         requestStaticData = false;
+
+        if (completedLivePass && device != nullptr && device->getProtocol() == MODBUS_POWMR)
+        {
+            capturePowmrSocSample();
+        }
+
         if (requestCallback)
         {
             requestCallback();
@@ -100,6 +107,144 @@ void MODBUS::loop()
 void MODBUS::callback(std::function<void()> func)
 {
     requestCallback = func;
+}
+
+void MODBUS::capturePowmrSocSample()
+{
+    const unsigned long now = millis();
+    if (_powmrSocHistoryCount > 0 &&
+        static_cast<unsigned long>(now - _powmrSocLastSampleMs) < kPowMrSocSampleIntervalMs)
+    {
+        return;
+    }
+
+    const JsonVariant socVar = liveData[DESCR_Battery_Percent];
+    const JsonVariant voltageVar = liveData[DESCR_Battery_Voltage];
+    const JsonVariant chargeVar = liveData[DESCR_Battery_Charge_Current];
+    const JsonVariant dischargeVar = liveData[DESCR_Battery_Discharge_Current];
+
+    if (socVar.isNull() || voltageVar.isNull() || chargeVar.isNull() || dischargeVar.isNull())
+    {
+        return;
+    }
+
+    const int soc = socVar.as<int>();
+    const float voltage = voltageVar.as<float>();
+    const int charge = chargeVar.as<int>();
+    const int discharge = dischargeVar.as<int>();
+
+    if (soc < 0 || soc > 100 || voltage < 35.0f || voltage > 70.0f ||
+        charge < 0 || charge > 300 || discharge < 0 || discharge > 300)
+    {
+        return;
+    }
+
+    PowMrSocSample &sample = _powmrSocHistory[_powmrSocHistoryHead];
+    sample.uptimeSeconds = now / 1000UL;
+    sample.batteryDeciVolts = static_cast<uint16_t>(voltage * 10.0f + 0.5f);
+    sample.socPercent = static_cast<uint8_t>(soc);
+    sample.chargeAmps = static_cast<uint16_t>(charge);
+    sample.dischargeAmps = static_cast<uint16_t>(discharge);
+    sample.valid = true;
+
+    _powmrSocHistoryHead = static_cast<uint8_t>((_powmrSocHistoryHead + 1) % kPowMrSocHistorySize);
+    if (_powmrSocHistoryCount < kPowMrSocHistorySize)
+    {
+        _powmrSocHistoryCount++;
+    }
+    _powmrSocLastSampleMs = now;
+}
+
+String MODBUS::buildPowmrSocDiag() const
+{
+    String answer;
+    answer.reserve(7000);
+    answer = "POWMR_SOC_DIAG interval=5min samples=";
+    answer += static_cast<unsigned int>(_powmrSocHistoryCount);
+    answer += "/";
+    answer += static_cast<unsigned int>(kPowMrSocHistorySize);
+    answer += "\n";
+
+    if (_powmrSocHistoryCount == 0)
+    {
+        answer += "NO HISTORY YET: wait for a complete PowMr live-data pass";
+        return answer;
+    }
+
+    const uint32_t nowSec = millis() / 1000UL;
+    const uint8_t oldestIndex = static_cast<uint8_t>(
+        (_powmrSocHistoryHead + kPowMrSocHistorySize - _powmrSocHistoryCount) %
+        kPowMrSocHistorySize);
+
+    uint8_t firstSoc = 0;
+    uint8_t lastSoc = 0;
+    uint32_t firstTime = 0;
+    uint32_t lastTime = 0;
+    float estimatedDischargeAh = 0.0f;
+    bool first = true;
+    bool havePrevious = false;
+    PowMrSocSample previous;
+
+    for (uint8_t i = 0; i < _powmrSocHistoryCount; ++i)
+    {
+        const uint8_t idx = static_cast<uint8_t>((oldestIndex + i) % kPowMrSocHistorySize);
+        const PowMrSocSample &sample = _powmrSocHistory[idx];
+        if (!sample.valid)
+            continue;
+
+        const uint32_t ageSec = nowSec >= sample.uptimeSeconds ? nowSec - sample.uptimeSeconds : 0;
+        const uint32_t ageMin = ageSec / 60UL;
+
+        char line[96];
+        snprintf(line, sizeof(line),
+                 "age=%lum SOC=%u V=%u.%u charge=%uA discharge=%uA\n",
+                 static_cast<unsigned long>(ageMin),
+                 static_cast<unsigned int>(sample.socPercent),
+                 static_cast<unsigned int>(sample.batteryDeciVolts / 10),
+                 static_cast<unsigned int>(sample.batteryDeciVolts % 10),
+                 static_cast<unsigned int>(sample.chargeAmps),
+                 static_cast<unsigned int>(sample.dischargeAmps));
+        answer += line;
+
+        if (first)
+        {
+            firstSoc = sample.socPercent;
+            firstTime = sample.uptimeSeconds;
+            first = false;
+        }
+        lastSoc = sample.socPercent;
+        lastTime = sample.uptimeSeconds;
+
+        if (havePrevious && sample.uptimeSeconds >= previous.uptimeSeconds)
+        {
+            const float hours = static_cast<float>(sample.uptimeSeconds - previous.uptimeSeconds) / 3600.0f;
+            const float netDischarge = static_cast<float>(
+                previous.dischargeAmps > previous.chargeAmps
+                    ? previous.dischargeAmps - previous.chargeAmps
+                    : 0);
+            estimatedDischargeAh += netDischarge * hours;
+        }
+        previous = sample;
+        havePrevious = true;
+    }
+
+    const uint32_t spanMin = (lastTime >= firstTime) ? (lastTime - firstTime) / 60UL : 0;
+    answer += "SUMMARY span=";
+    answer += static_cast<unsigned long>(spanMin);
+    answer += "m SOC=";
+    answer += static_cast<unsigned int>(firstSoc);
+    answer += "->";
+    answer += static_cast<unsigned int>(lastSoc);
+    answer += " estimated_net_discharge=";
+    answer += String(estimatedDischargeAh, 1);
+    answer += "Ah";
+
+    if (spanMin >= 30 && firstSoc == lastSoc && estimatedDischargeAh >= 5.0f)
+    {
+        answer += " WARNING=SOC_STUCK_SUSPECTED";
+    }
+
+    return answer;
 }
 
 void MODBUS::powmrDumpTask(void *param)
@@ -183,6 +328,13 @@ String MODBUS::requestData(String command)
 {
     requestStaticData = true;
     command.trim();
+
+    // In-RAM SOC history sampled every five minutes from PowMr live registers.
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command == "powmr socdiag")
+    {
+        return buildPowmrSocDiag();
+    }
 
     // PowMr/Victor battery type (menu 05).
     // Read:  powmr batterytype
@@ -372,7 +524,12 @@ String MODBUS::requestData(String command)
         command == "powmr dump result")
     {
         if (_powmrDumpRunning)
-            return "RUNNING: PowMr dump is still collecting registers";
+        {
+            return String("RUNNING: reg=") +
+                   static_cast<unsigned int>(_powmrDumpCurrentRegister) +
+                   " readable=" + static_cast<unsigned int>(_powmrDumpReadable) +
+                   " failed=" + static_cast<unsigned int>(_powmrDumpFailed);
+        }
         if (!_powmrDumpReady)
             return "NO RESULT: start with 'powmr dump'";
         return _powmrDumpResult;
