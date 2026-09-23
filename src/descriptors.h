@@ -192,7 +192,9 @@
 #define DESCR_Machine_Type "Machine_Type"                                       // SS
 #define DESCR_Topology "Topology"                                               // T
 #define DESCR_Output_Mode "Output_Mode"                                         // U
-#define DESCR_Battery_Redischarge_Voltage "Battery_Redischarge_Voltage"         // VV.V
+#define DESCR_Battery_Redischarge_Voltage "Battery_Redischarge_Voltage"
+#define DESCR_Battery_Back_To_Utility_SOC "Battery_Back_To_Utility_SOC"
+#define DESCR_Battery_Back_To_Battery_SOC "Battery_Back_To_Battery_SOC"         // VV.V
 #define DESCR_PV_OK_Condition_For_Parallel "PV_OK_Condition_For_Parallel"       // W
 #define DESCR_PV_Power_Balance "PV_Power_Balance"                               // X
 #define DESCR_Max_Charging_Time_At_CV_Stage "Max_Charging_Time_At_CV_Stage"     // YYY
