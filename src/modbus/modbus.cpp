@@ -258,8 +258,8 @@ void MODBUS::powmrDumpTask(void *param)
 void MODBUS::runPowmrDump()
 {
     String answer;
-    answer.reserve(12000);
-    answer = "POWMR_SCAN BEGIN ranges=4566-4999,5100-5500 (readable only)\n";
+    answer.reserve(14000);
+    answer = "POWMR_DIAG BEGIN holding=4500-4564,5000-5038 input=4500-4564,5000-5038 readable-only\n";
 
     uint16_t readable = 0;
     uint16_t failed = 0;
@@ -267,47 +267,72 @@ void MODBUS::runPowmrDump()
     _mCom.setResponseTimeout(250);
     _mCom.clearReadCache();
 
-    _powmrDumpCurrentRegister = 4566;
+    _powmrDumpCurrentRegister = 4500;
     _powmrDumpReadable = 0;
     _powmrDumpFailed = 0;
 
     ModbusMaster *mb = _mCom.getModbusMaster();
 
-    auto scanRange = [&](uint16_t first, uint16_t last) {
+    auto appendReadable = [&](const char *space, uint16_t reg, uint16_t raw) {
+        const uint16_t swapped = static_cast<uint16_t>((raw >> 8) | (raw << 8));
+        const uint16_t candidates[] = {25, 30, 35, 70, 99, 250, 300, 350, 700, 990};
+        bool marked = false;
+        for (uint16_t v : candidates)
+        {
+            if (raw == v || swapped == v)
+            {
+                marked = true;
+                break;
+            }
+        }
+        char line[104];
+        snprintf(line, sizeof(line), "%s reg=%u raw=%u swap=%u hex=0x%04X%s\n",
+                 space, static_cast<unsigned int>(reg), static_cast<unsigned int>(raw),
+                 static_cast<unsigned int>(swapped), static_cast<unsigned int>(raw),
+                 marked ? " CANDIDATE" : "");
+        answer += line;
+        readable++;
+        _powmrDumpReadable = readable;
+    };
+
+    auto scanHolding = [&](uint16_t first, uint16_t last) {
         for (uint16_t reg = first; reg <= last; ++reg)
         {
             _powmrDumpCurrentRegister = reg;
             const uint8_t result = mb->readHoldingRegisters(reg, 1);
             if (result == mb->ku8MBSuccess)
-            {
-                const uint16_t raw = mb->getResponseBuffer(0);
-                const uint16_t swapped = static_cast<uint16_t>((raw >> 8) | (raw << 8));
-                char line[88];
-                snprintf(line, sizeof(line),
-                         "reg=%u raw=%u swap=%u hex=0x%04X%s\n",
-                         static_cast<unsigned int>(reg),
-                         static_cast<unsigned int>(raw),
-                         static_cast<unsigned int>(swapped),
-                         static_cast<unsigned int>(raw),
-                         (raw == 30 || raw == 70 || swapped == 30 || swapped == 70) ? " MATCH_30_70" : "");
-                answer += line;
-                readable++;
-                _powmrDumpReadable = readable;
-            }
+                appendReadable("H", reg, mb->getResponseBuffer(0));
             else
             {
                 failed++;
                 _powmrDumpFailed = failed;
             }
-
             vTaskDelay(1);
         }
     };
 
-    scanRange(4566, 4999);
-    scanRange(5100, 5500);
+    auto scanInput = [&](uint16_t first, uint16_t last) {
+        for (uint16_t reg = first; reg <= last; ++reg)
+        {
+            _powmrDumpCurrentRegister = reg;
+            const uint8_t result = mb->readInputRegisters(reg, 1);
+            if (result == mb->ku8MBSuccess)
+                appendReadable("I", reg, mb->getResponseBuffer(0));
+            else
+            {
+                failed++;
+                _powmrDumpFailed = failed;
+            }
+            vTaskDelay(1);
+        }
+    };
 
-    answer += "POWMR_SCAN END readable=";
+    scanHolding(4500, 4564);
+    scanHolding(5000, 5038);
+    scanInput(4500, 4564);
+    scanInput(5000, 5038);
+
+    answer += "POWMR_DIAG END readable=";
     answer += readable;
     answer += " failed=";
     answer += failed;
@@ -319,11 +344,10 @@ void MODBUS::runPowmrDump()
     _powmrDumpReady = true;
     _powmrDumpRunning = false;
 
-    writeLog("POWMR_SCAN async complete readable=%u failed=%u",
+    writeLog("POWMR_DIAG complete readable=%u failed=%u",
              static_cast<unsigned int>(readable),
              static_cast<unsigned int>(failed));
 }
-
 String MODBUS::requestData(String command)
 {
     requestStaticData = true;
@@ -336,6 +360,52 @@ String MODBUS::requestData(String command)
         return buildPowmrSocDiag();
     }
 
+    // Compact read-only snapshot of known battery/BMS-facing registers.
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command == "powmr bmsdiag")
+    {
+        if (_powmrDumpRunning)
+            return "ERROR: wait for PowMr diagnostic scan to finish";
+
+        auto readOne = [&](uint16_t reg, uint16_t &value) -> bool {
+            _mCom.clearReadCache();
+            return _mCom.readHoldingBlock(reg, 1, &value, 1);
+        };
+        auto swap16 = [](uint16_t value) -> uint16_t {
+            return static_cast<uint16_t>((value >> 8) | (value << 8));
+        };
+
+        uint16_t r4506=0, r4507=0, r4508=0, r4509=0;
+        uint16_t r4539=0, r4553=0, r4554=0, r4557=0;
+        const bool ok =
+            readOne(4506, r4506) && readOne(4507, r4507) &&
+            readOne(4508, r4508) && readOne(4509, r4509) &&
+            readOne(4539, r4539) && readOne(4553, r4553) &&
+            readOne(4554, r4554) && readOne(4557, r4557);
+
+        if (!ok)
+            return "ERROR: one or more BMS diagnostic registers could not be read";
+
+        String answer = "POWMR_BMS_DIAG";
+        answer += " V=";
+        answer += String(swap16(r4506) / 10.0f, 1);
+        answer += " SOC4507=";
+        answer += static_cast<unsigned int>(swap16(r4507));
+        answer += " charge=";
+        answer += static_cast<unsigned int>(swap16(r4508));
+        answer += "A discharge=";
+        answer += static_cast<unsigned int>(swap16(r4509));
+        answer += "A batteryType=";
+        answer += static_cast<unsigned int>(swap16(r4539));
+        answer += " flags4553=0x";
+        answer += String(swap16(r4553), HEX);
+        answer += " flags4554=0x";
+        answer += String(swap16(r4554), HEX);
+        answer += " invTemp4557=";
+        answer += static_cast<unsigned int>(swap16(r4557));
+        answer += "C";
+        return answer;
+    }
     // PowMr/Victor battery type (menu 05).
     // Read:  powmr batterytype
     // Write: powmr batterytype AGM|FLD|USE|LIB|LIC|LIP|LIL
@@ -553,7 +623,7 @@ String MODBUS::requestData(String command)
         }
 
         _powmrDumpTask = handle;
-        return "STARTED: wide PowMr scan 4566-4999,5100-5500; use 'powmr dump result' for progress/result";
+        return "STARTED: PowMr BMS/SOC/temperature diagnostic scan; use 'powmr dump result' for progress/result";
     }
 
     // SOC threshold writes are intentionally disabled until the exact Victor
