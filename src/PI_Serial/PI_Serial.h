@@ -303,6 +303,7 @@ private:
     bool PIXX_QFLAG();
 
     bool isModbus();
+    String probePowMrPiTemperatures();
 
     static bool checkQFLAG(const String& flags, char symbol);
 };
