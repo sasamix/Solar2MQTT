@@ -259,7 +259,7 @@ void MODBUS::runPowmrDump()
 {
     String answer;
     answer.reserve(14000);
-    answer = "POWMR_DIAG BEGIN holding=4500-4564,5000-5038 input=4500-4564,5000-5038 readable-only\n";
+    answer = "POWMR_DIAG BEGIN holding=4500-4564,5000-5038 readable-only\n";
 
     uint16_t readable = 0;
     uint16_t failed = 0;
@@ -311,26 +311,8 @@ void MODBUS::runPowmrDump()
         }
     };
 
-    auto scanInput = [&](uint16_t first, uint16_t last) {
-        for (uint16_t reg = first; reg <= last; ++reg)
-        {
-            _powmrDumpCurrentRegister = reg;
-            const uint8_t result = mb->readInputRegisters(reg, 1);
-            if (result == mb->ku8MBSuccess)
-                appendReadable("I", reg, mb->getResponseBuffer(0));
-            else
-            {
-                failed++;
-                _powmrDumpFailed = failed;
-            }
-            vTaskDelay(1);
-        }
-    };
-
     scanHolding(4500, 4564);
     scanHolding(5000, 5038);
-    scanInput(4500, 4564);
-    scanInput(5000, 5038);
 
     answer += "POWMR_DIAG END readable=";
     answer += readable;
@@ -406,6 +388,101 @@ String MODBUS::requestData(String command)
         answer += "C";
         return answer;
     }
+
+    // Correlation helper for unknown PowMr registers.
+    // First call stores a baseline; later calls show only changed registers.
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command == "powmr watch")
+    {
+        if (_powmrDumpRunning)
+            return "ERROR: wait for PowMr diagnostic scan to finish";
+
+        uint16_t blockA[18] = {};
+        uint16_t blockB[9] = {};
+        _mCom.clearReadCache();
+        const bool okA = _mCom.readHoldingBlock(4517, 18, blockA, 18);
+        _mCom.clearReadCache();
+        const bool okB = _mCom.readHoldingBlock(4556, 9, blockB, 9);
+        if (!okA || !okB)
+            return "ERROR: unable to read one of the watch ranges";
+
+        uint16_t current[kPowMrWatchCount] = {};
+        for (uint8_t i = 0; i < 18; ++i)
+            current[i] = blockA[i];
+        for (uint8_t i = 0; i < 9; ++i)
+            current[18 + i] = blockB[i];
+
+        auto regForIndex = [](uint8_t i) -> uint16_t {
+            return i < 18 ? static_cast<uint16_t>(4517 + i)
+                          : static_cast<uint16_t>(4556 + (i - 18));
+        };
+        auto swap16 = [](uint16_t value) -> uint16_t {
+            return static_cast<uint16_t>((value >> 8) | (value << 8));
+        };
+
+        String answer;
+        answer.reserve(3000);
+        const uint32_t nowSec = millis() / 1000UL;
+
+        if (!_powmrWatchValid)
+        {
+            answer = "POWMR_WATCH BASELINE\n";
+            for (uint8_t i = 0; i < kPowMrWatchCount; ++i)
+            {
+                const uint16_t reg = regForIndex(i);
+                answer += String(reg);
+                answer += " raw=";
+                answer += static_cast<unsigned int>(current[i]);
+                answer += " swap=";
+                answer += static_cast<unsigned int>(swap16(current[i]));
+                answer += "\n";
+                _powmrWatchValues[i] = current[i];
+            }
+            _powmrWatchValid = true;
+            _powmrWatchCapturedAt = nowSec;
+            answer += "Run 'powmr watch' again later to show changes only.";
+            return answer;
+        }
+
+        const uint32_t ageSec = nowSec >= _powmrWatchCapturedAt ? nowSec - _powmrWatchCapturedAt : 0;
+        answer = "POWMR_WATCH CHANGES since=";
+        answer += static_cast<unsigned long>(ageSec);
+        answer += "s\n";
+
+        uint8_t changed = 0;
+        for (uint8_t i = 0; i < kPowMrWatchCount; ++i)
+        {
+            if (current[i] == _powmrWatchValues[i])
+                continue;
+
+            const uint16_t reg = regForIndex(i);
+            answer += String(reg);
+            answer += " raw ";
+            answer += static_cast<unsigned int>(_powmrWatchValues[i]);
+            answer += "->";
+            answer += static_cast<unsigned int>(current[i]);
+            answer += " swap ";
+            answer += static_cast<unsigned int>(swap16(_powmrWatchValues[i]));
+            answer += "->";
+            answer += static_cast<unsigned int>(swap16(current[i]));
+            answer += "\n";
+            changed++;
+        }
+
+        if (changed == 0)
+            answer += "NO CHANGES\n";
+
+        answer += "changed=";
+        answer += static_cast<unsigned int>(changed);
+        answer += "/";
+        answer += static_cast<unsigned int>(kPowMrWatchCount);
+
+        for (uint8_t i = 0; i < kPowMrWatchCount; ++i)
+            _powmrWatchValues[i] = current[i];
+        _powmrWatchCapturedAt = nowSec;
+        return answer;
+    }
+
     // PowMr/Victor battery type (menu 05).
     // Read:  powmr batterytype
     // Write: powmr batterytype AGM|FLD|USE|LIB|LIC|LIP|LIL
@@ -518,8 +595,8 @@ String MODBUS::requestData(String command)
     }
 
     // Safe read-only Victor/PowMr register diagnostics.
-    // Syntax: powmr read <start> <count>. Restrict to the 5000-series
-    // control/config area and never perform writes from this command.
+    // Syntax: powmr read <start> <count>. Allow the known diagnostic window
+    // 4500..5099; unsupported addresses are reported as X. Never writes.
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
         command.startsWith("powmr read "))
     {
@@ -530,9 +607,9 @@ String MODBUS::requestData(String command)
             return "ERROR: syntax powmr read <start> <count>";
         const int start = args.substring(0, split).toInt();
         const int count = args.substring(split + 1).toInt();
-        if (start < 5000 || start > 5099 || count < 1 || count > 20 ||
+        if (start < 4500 || start > 5099 || count < 1 || count > 20 ||
             start + count - 1 > 5099)
-            return "ERROR: diagnostic range must stay within 5000..5099, max 20 registers";
+            return "ERROR: diagnostic range must stay within 4500..5099, max 20 registers";
 
         uint16_t values[20] = {};
         String answer = "OK:";
