@@ -83,6 +83,9 @@ private:
 
     volatile bool _powmrDumpRunning = false;
     volatile bool _powmrDumpReady = false;
+    volatile uint16_t _powmrDumpCurrentRegister = 0;
+    volatile uint16_t _powmrDumpReadable = 0;
+    volatile uint16_t _powmrDumpFailed = 0;
     String _powmrDumpResult;
     TaskHandle_t _powmrDumpTask = nullptr;
 };
