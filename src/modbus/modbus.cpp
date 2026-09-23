@@ -634,6 +634,146 @@ String MODBUS::requestData(String command)
                " (" + static_cast<unsigned int>(readback) + ")";
     }
 
+    // Known PowMr/Victor writable settings mirrored in 50xx control registers.
+    // Syntax: powmr setting <name> <value>
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command.startsWith("powmr setting "))
+    {
+        if (_powmrDumpRunning)
+            return "ERROR: wait for PowMr diagnostic scan to finish before changing settings";
+
+        String args = command.substring(14);
+        args.trim();
+        const int split = args.indexOf(' ');
+        if (split <= 0)
+            return "ERROR: syntax powmr setting <name> <value>";
+
+        String name = args.substring(0, split);
+        String valueText = args.substring(split + 1);
+        name.trim();
+        name.toLowerCase();
+        valueText.trim();
+
+        uint16_t reg = 0;
+        uint16_t raw = 0;
+        String displayValue;
+
+        auto parseIntRange = [&](int minValue, int maxValue, uint16_t targetReg, const char *unit) -> bool {
+            const int value = valueText.toInt();
+            if (value < minValue || value > maxValue)
+                return false;
+            reg = targetReg;
+            raw = static_cast<uint16_t>(value);
+            displayValue = String(value);
+            if (unit && *unit)
+            {
+                displayValue += " ";
+                displayValue += unit;
+            }
+            return true;
+        };
+
+        auto parseVoltage = [&](float minValue, float maxValue, uint16_t targetReg) -> bool {
+            const float value = valueText.toFloat();
+            if (value < minValue || value > maxValue)
+                return false;
+            reg = targetReg;
+            raw = static_cast<uint16_t>(lroundf(value * 10.0f));
+            displayValue = String(raw / 10.0f, 1) + " V";
+            return true;
+        };
+
+        bool valid = false;
+
+        if (name == "chargerpriority")
+        {
+            String v = valueText;
+            v.toUpperCase();
+            if (v == "UTILITY") { reg = 5017; raw = 0; valid = true; }
+            else if (v == "SOLAR") { reg = 5017; raw = 1; valid = true; }
+            else if (v == "SOLAR_UTILITY") { reg = 5017; raw = 2; valid = true; }
+            else if (v == "SOLAR_ONLY") { reg = 5017; raw = 3; valid = true; }
+            displayValue = v;
+        }
+        else if (name == "inputrange")
+        {
+            String v = valueText;
+            v.toUpperCase();
+            if (v == "APL") { reg = 5019; raw = 0; valid = true; displayValue = "Appliances"; }
+            else if (v == "UPS") { reg = 5019; raw = 1; valid = true; displayValue = "UPS"; }
+        }
+        else if (name == "outputfreq")
+        {
+            const int hz = valueText.toInt();
+            if (hz == 50 || hz == 60)
+            {
+                reg = 5021;
+                raw = hz == 50 ? 0 : 1;
+                valid = true;
+                displayValue = String(hz) + " Hz";
+            }
+        }
+        else if (name == "maxcharge")
+            valid = parseIntRange(0, 120, 5022, "A");
+        else if (name == "outputvoltage")
+        {
+            const int volts = valueText.toInt();
+            if (volts == 220 || volts == 230 || volts == 240)
+            {
+                reg = 5023;
+                raw = static_cast<uint16_t>(volts);
+                valid = true;
+                displayValue = String(volts) + " V";
+            }
+        }
+        else if (name == "utilitycharge")
+            valid = parseIntRange(0, 120, 5024, "A");
+        else if (name == "recharge")
+            valid = parseVoltage(40.0f, 60.0f, 5025);
+        else if (name == "redischarge")
+            valid = parseVoltage(40.0f, 60.0f, 5026);
+        else if (name == "bulk")
+            valid = parseVoltage(40.0f, 60.0f, 5027);
+        else if (name == "float")
+            valid = parseVoltage(40.0f, 60.0f, 5028);
+        else if (name == "cutoff")
+            valid = parseVoltage(40.0f, 60.0f, 5029);
+        else if (name == "equalizationvoltage")
+            valid = parseVoltage(40.0f, 60.0f, 5030);
+        else if (name == "equalizationtime")
+            valid = parseIntRange(0, 999, 5031, "min");
+        else if (name == "equalizationtimeout")
+            valid = parseIntRange(0, 999, 5032, "min");
+        else if (name == "equalizationinterval")
+            valid = parseIntRange(0, 999, 5033, "day");
+
+        if (!valid || reg == 0)
+            return String("ERROR: invalid or unsupported PowMr setting: ") + name + "=" + valueText;
+
+        if (!_mCom.writeHoldingRegister(reg, raw))
+        {
+            const uint8_t result = _mCom.getLastWriteResult();
+            return String("ERROR: setting write failed reg=") + reg +
+                   " result=" + static_cast<unsigned int>(result) + " (" +
+                   _mCom.getLastWriteResultText() + ")";
+        }
+
+        delay(150);
+        uint16_t readback = 0xFFFF;
+        _mCom.clearReadCache();
+        if (!_mCom.readHoldingBlock(reg, 1, &readback, 1))
+            return String("ERROR: setting write accepted but readback failed reg=") + reg;
+
+        if (readback != raw)
+            return String("ERROR: setting readback mismatch reg=") + reg +
+                   " requested=" + raw + " actual=" + readback;
+
+        static_info.curr_register = 0;
+        requestStaticData = true;
+        return String("OK: ") + name + " = " + displayValue +
+               " (reg " + reg + ", raw " + raw + ")";
+    }
+
     // Guarded first write command for PowMr/Victor.
     // Syntax: powmr charge <amps>
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
