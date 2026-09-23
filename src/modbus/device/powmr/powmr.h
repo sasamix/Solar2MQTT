@@ -31,8 +31,8 @@ private:
     static constexpr uint16_t kSettingsBlockCount = 11;
     static constexpr uint16_t kConfigBlockStart = 4546;
     static constexpr uint16_t kConfigBlockCount = 10;
-    static constexpr uint16_t kStatusBlockStart = 4556;
-    static constexpr uint16_t kStatusBlockCount = 6;
+    static constexpr uint16_t kStatusBlockStart = 4557;
+    static constexpr uint16_t kStatusBlockCount = 1;
 
     inline static const modbus_register_t registers_live[] = {
         {4501, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, DESCR_Inverter_Operation_Mode, 0, {}, nullptr, kMainBlockStart, kMainBlockCount},
@@ -51,12 +51,7 @@ private:
         {4514, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, DESCR_Output_Load_Percent, 0, {}, nullptr, kMainBlockStart, kMainBlockCount},
         {4530, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, DESCR_Fault_Code, 0, {}, nullptr, kFaultBlockStart, kFaultBlockCount},
         {4555, MODBUS_TYPE_HOLDING, REGISTER_TYPE_CUSTOM_VAL_NAME_SWAP, "Charger_Status", 0, {.bitfield = {"Off", "Idle", "Charging"}}, nullptr, kConfigBlockStart, kConfigBlockCount},
-        {4556, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, "PowMr_Debug_4556", 0, {}, nullptr, kStatusBlockStart, kStatusBlockCount},
         {4557, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, DESCR_Inverter_Temperature, 0, {}, nullptr, kStatusBlockStart, kStatusBlockCount},
-        {4558, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, "PowMr_Debug_4558", 0, {}, nullptr, kStatusBlockStart, kStatusBlockCount},
-        {4559, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, "PowMr_Debug_4559", 0, {}, nullptr, kStatusBlockStart, kStatusBlockCount},
-        {4560, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, "PowMr_Debug_4560", 0, {}, nullptr, kStatusBlockStart, kStatusBlockCount},
-        {4561, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, "PowMr_Debug_4561", 0, {}, nullptr, kStatusBlockStart, kStatusBlockCount},
     };
 
     inline static const modbus_register_t registers_static[] = {
