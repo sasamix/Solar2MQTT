@@ -757,6 +757,16 @@ function renderStatus(data) {
   setText("devicename", data.deviceName || data.EspData?.Device_name || "Solar2MQTT");
   setText("pageTitleDevice", data.EspData?.Device_name || "Solar2MQTT");
   setText("loopbackInfo", data.loopback?.message || "-");
+
+  const activeProtocol =
+    data.Status?.protocol ||
+    data.EspData?.detect_protocol_name ||
+    data.protocol ||
+    "";
+  const victorSbuPanel = byId("victorSbuPanel");
+  if (victorSbuPanel) {
+    victorSbuPanel.hidden = activeProtocol !== "MODBUS_POWMR";
+  }
   setText("metricPvPower", formatValue(totalSolarPower(data), " W"));
   setText("metricBatteryPercent", formatValue(data.LiveData?.Battery_Percent, " %"));
   setText("metricBatteryVoltage", formatValue(data.LiveData?.Battery_Voltage ?? data.LiveData?.Positive_Battery_Voltage, " V"));
