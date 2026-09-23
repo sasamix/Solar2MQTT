@@ -29,23 +29,23 @@ jobs:
         run: pio run -e m5stack_atom_lite
       - name: Verify OTA artifact
         run: |
-          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14E.bin.ota"
-          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14E.bin"
+          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14F.bin.ota"
+          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14F.bin"
           ls -lh .firmware/
       - name: Upload firmware to GitHub Release
         if: github.event_name == 'release' || github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.event_name == 'release' && github.event.release.tag_name || 'v0.0.0-dev-2.0.14E' }}"
+          TAG="${{ github.event_name == 'release' && github.event.release.tag_name || 'v0.0.0-dev-2.0.14F' }}"
           # Create the versioned release on first publication.
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Solar2MQTT 0.0.0-dev-2.0.14E" --target "${{ github.sha }}" --notes "M5Stack ATOM Lite diagnostic build 0.0.0-dev-2.0.14E"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Solar2MQTT 0.0.0-dev-2.0.14F" --target "${{ github.sha }}" --notes "M5Stack ATOM Lite diagnostic build 0.0.0-dev-2.0.14F"
           # Delete by asset name first. This avoids gh --clobber using a stale asset ID.
-          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14E.bin.ota" -y 2>/dev/null || true
-          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14E.bin" -y 2>/dev/null || true
+          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14F.bin.ota" -y 2>/dev/null || true
+          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14F.bin" -y 2>/dev/null || true
           gh release upload "$TAG" \
-            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14E.bin.ota" \
-            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14E.bin"
+            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14F.bin.ota" \
+            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14F.bin"
       - name: Remove old diagnostic releases
         if: github.event_name == 'push'
         env:
@@ -62,7 +62,8 @@ jobs:
             v0.0.0-dev-2.0.14A \
             v0.0.0-dev-2.0.14B \
             v0.0.0-dev-2.0.14C \
-            v0.0.0-dev-2.0.14D
+            v0.0.0-dev-2.0.14D \
+            v0.0.0-dev-2.0.14E
           do
             gh release delete "$TAG" --cleanup-tag -y 2>/dev/null || true
           done
@@ -70,6 +71,6 @@ jobs:
         with:
           name: Solar2MQTT-m5stack-atom-lite
           path: |
-            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14E.bin.ota
-            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14E.bin
+            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14F.bin.ota
+            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14F.bin
           if-no-files-found: error
