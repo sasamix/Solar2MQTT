@@ -251,14 +251,7 @@ const OVERVIEW_GROUPS = [
       { label: "Charge", keys: ["Inverter_Charge_State"], numeric: false },
     ],
   },
-,
-  {
-    title: "SBU thresholds",
-    fields: [
-      { label: "Grid", keys: ["Battery_Back_To_Utility_SOC"], unit: "%", decimals: 0 },
-      { label: "Battery", keys: ["Battery_Back_To_Battery_SOC"], unit: "%", decimals: 0 },
-    ],
-  }];
+];
 
 function isDataValuePresent(value) {
   if (value === null || value === undefined) {
@@ -758,10 +751,10 @@ function renderStatus(data) {
   setText("metricBatteryVoltage", formatValue(data.LiveData?.Battery_Voltage ?? data.LiveData?.Positive_Battery_Voltage, " V"));
   if (data.RawData && Object.prototype.hasOwnProperty.call(data.RawData, "CommandAnswer")) {
     setText("commandAnswer", data.RawData.CommandAnswer || "-");
-    const utilitySoc = pickDataValue(data, ["Battery_Back_To_Utility_SOC"], ["DeviceData"]);
-    const batterySoc = pickDataValue(data, ["Battery_Back_To_Battery_SOC"], ["DeviceData"]);
-    setText("sbuUtilitySoc", utilitySoc !== null ? utilitySoc + "%" : "-");
-    setText("sbuBatterySoc", batterySoc !== null ? batterySoc + "%" : "-");
+    const utilitySoc = pickDataValue(data, ["Battery_Recharge_Voltage"], ["DeviceData"]);
+    const batterySoc = pickDataValue(data, ["Battery_Redischarge_Voltage"], ["DeviceData"]);
+    setText("sbuUtilitySoc", utilitySoc !== null ? utilitySoc + " V" : "-");
+    setText("sbuBatterySoc", batterySoc !== null ? batterySoc + " V" : "-");
     const utilityInput = byId("sbuUtilityInput");
     const batteryInput = byId("sbuBatteryInput");
     if (utilityInput && utilitySoc !== null && document.activeElement !== utilityInput) utilityInput.value = utilitySoc;
@@ -1059,33 +1052,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     const result = await postForm("/api/settings/device", form);
     showNotice(result?.message || "Device settings applied.");
   });
-
-  const bindSbuSocForm = (formId, inputId, prefix) => {
-    const form = byId(formId);
-    const input = byId(inputId);
-    if (!form || !input) return;
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const value = Number(input.value);
-      if (!Number.isFinite(value)) return;
-      const body = new URLSearchParams();
-      body.set("command", prefix + String(Math.round(value)));
-      try {
-        await fetch("/api/command", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-          body: body.toString(),
-        });
-        const data = await waitForCommandAnswer(5000, 200);
-        setText("sbuCommandAnswer", data.RawData?.CommandAnswer || "No answer");
-        window.setTimeout(() => loadStatus(), 500);
-      } catch (error) {
-        setText("sbuCommandAnswer", String(error));
-      }
-    });
-  };
-  bindSbuSocForm("sbuUtilityForm", "sbuUtilityInput", "powmr backutility ");
-  bindSbuSocForm("sbuBatteryForm", "sbuBatteryInput", "powmr backbattery ");
 
   bindSubmit("commandForm", async (form) => {
     await postForm("/api/command", form);
