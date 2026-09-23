@@ -1204,6 +1204,27 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  bindClick("powmrWatchBtn", async () => {
+    const body = new URLSearchParams();
+    body.set("command", "powmr watch");
+    await fetchJson("/api/command", { method: "POST", body });
+    const data = await waitForCommandAnswer();
+    const answer = data.RawData?.CommandAnswer || "-";
+    setText("commandAnswer", answer);
+    const preview = byId("dataPreview");
+    if (preview) {
+      preview.textContent = JSON.stringify(data || {}, null, 2);
+    }
+    setText("dataPreviewMeta", `Last updated: ${new Date().toLocaleTimeString("en-GB")}`);
+    if (answer.startsWith("POWMR_WATCH")) {
+      showNotice("Register watch snapshot loaded.");
+    } else if (answer && answer !== "-") {
+      showNotice(answer, true);
+    } else {
+      showNotice("Register watch command sent. No answer received yet.", true);
+    }
+  });
+
 
   bindClick("rebootBtn", async () => {
     await fetchJson("/api/reboot", { method: "POST" });
