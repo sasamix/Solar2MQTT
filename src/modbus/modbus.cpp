@@ -133,6 +133,61 @@ String MODBUS::requestData(String command)
         return String("OK: Max charging current = ") + amps + " A";
     }
 
+    // Victor/PowMr SBU control registers.
+    // 5018: output source priority (0=Utility, 1=Solar, 2=SBU)
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command.startsWith("powmr output "))
+    {
+        String mode = command.substring(13);
+        mode.toLowerCase();
+        int value = -1;
+        if (mode == "utility") value = 0;
+        else if (mode == "solar") value = 1;
+        else if (mode == "sbu") value = 2;
+        if (value < 0)
+            return "ERROR: allowed output mode is utility/solar/sbu";
+
+        if (!_mCom.writeHoldingRegister(5018, static_cast<uint16_t>(value)))
+        {
+            const uint8_t result = _mCom.getLastWriteResult();
+            return String("ERROR: Modbus write failed result=") +
+                   static_cast<unsigned int>(result) + " (" +
+                   _mCom.getLastWriteResultText() + ")";
+        }
+        _mCom.clearReadCache();
+        static_info.curr_register = 0;
+        return String("OK: Output source priority = ") + mode;
+    }
+
+    // 5025/5026 use voltage in 0.5 V steps. The register value is volts * 10
+    // (for example 48.0 V -> 480).
+    const bool isBackUtility = command.startsWith("powmr backutility ");
+    const bool isBackBattery = command.startsWith("powmr backbattery ");
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        (isBackUtility || isBackBattery))
+    {
+        const int prefixLen = isBackUtility ? 18 : 18;
+        const float volts = command.substring(prefixLen).toFloat();
+        const int tenths = static_cast<int>(volts * 10.0f + 0.5f);
+
+        // Conservative 48 V-family bounds from the documented PowMr control map.
+        if ((tenths % 5) != 0 || tenths < 440 || tenths > 580)
+            return "ERROR: voltage must be 44.0..58.0 V in 0.5 V steps";
+
+        const uint16_t reg = isBackUtility ? 5025 : 5026;
+        if (!_mCom.writeHoldingRegister(reg, static_cast<uint16_t>(tenths)))
+        {
+            const uint8_t result = _mCom.getLastWriteResult();
+            return String("ERROR: Modbus write failed result=") +
+                   static_cast<unsigned int>(result) + " (" +
+                   _mCom.getLastWriteResultText() + ")";
+        }
+        _mCom.clearReadCache();
+        static_info.curr_register = 0;
+        return String("OK: ") + (isBackUtility ? "Back to utility = " : "Back to battery = ") +
+               String(tenths / 10.0f, 1) + " V";
+    }
+
     writeLog("Custom Modbus command unsupported: %s", command.c_str());
     return "UNSUPPORTED";
 }
