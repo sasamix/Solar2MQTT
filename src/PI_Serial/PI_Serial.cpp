@@ -1222,7 +1222,14 @@ bool PI_Serial::sendCustomCommand()
 
     if (isModbus())
     {
-        get.raw.commandAnswer = modbus->requestData(customCommandBuffer);
+        if (protocol == MODBUS_POWMR && customCommandBuffer == "powmr pitemps")
+        {
+            get.raw.commandAnswer = probePowMrPiTemperatures();
+        }
+        else
+        {
+            get.raw.commandAnswer = modbus->requestData(customCommandBuffer);
+        }
     }
     else
     {
@@ -1230,6 +1237,85 @@ bool PI_Serial::sendCustomCommand()
     }
     customCommandBuffer = "";
     return true;
+}
+
+String PI_Serial::probePowMrPiTemperatures()
+{
+    if (modbus == nullptr || protocol != MODBUS_POWMR)
+        return "ERROR: MODBUS_POWMR is not active";
+
+    if (modbus->isDiagnosticBusy())
+        return "ERROR: wait for PowMr register scan to finish";
+
+    const protocol_type_t savedProtocol = protocol;
+    const char *savedStartChar = startChar;
+    const char *savedDelimiter = delimiter;
+    const unsigned int savedBaud = serialIntfBaud;
+
+    my_serialIntf->end();
+    serialIntfBaud = 2400;
+    protocol = PI30_MAX;
+    startChar = "(";
+    delimiter = " ";
+    my_serialIntf->begin(serialIntfBaud, SERIAL_8N1, _rxPin, _txPin);
+    delay(30);
+
+    const String answer = requestData("Q1");
+    get.raw.q1 = answer;
+
+    my_serialIntf->end();
+    protocol = savedProtocol;
+    startChar = savedStartChar;
+    delimiter = savedDelimiter;
+    serialIntfBaud = savedBaud;
+    my_serialIntf->begin(2400, SERIAL_8N1, _rxPin, _txPin);
+    delay(30);
+
+    if (answer == DESCR_req_NAK || answer == DESCR_req_NOA ||
+        answer == DESCR_req_ERCRC || answer.isEmpty())
+        return String("ERROR: Q1 temperature probe failed: ") + answer;
+
+    char buf[384];
+    answer.toCharArray(buf, sizeof(buf));
+    char *fields[40];
+    const int count = pi_split_fields(buf, ' ', fields, 40);
+
+    int inverterIndex = -1;
+    int batteryIndex = -1;
+    int transformerIndex = -1;
+    if (count >= 17)
+    {
+        inverterIndex = 6;
+        batteryIndex = 7;
+        transformerIndex = 8;
+    }
+    else if (count >= 13)
+    {
+        inverterIndex = 4;
+        batteryIndex = 5;
+        transformerIndex = 6;
+    }
+
+    if (inverterIndex < 0 || transformerIndex >= count)
+        return String("ERROR: unsupported Q1 field count=") + count + " raw=" + answer;
+
+    const double inv = pi_parse_double(fields[inverterIndex]);
+    const double bat = pi_parse_double(fields[batteryIndex]);
+    const double trf = pi_parse_double(fields[transformerIndex]);
+
+    liveData[DESCR_Inverter_Temperature] = inv;
+    liveData[DESCR_Battery_Temperature] = bat;
+    liveData[DESCR_Transformer_Temperature] = trf;
+
+    String result = "OK: PI temps INV=";
+    result += String(inv, 0);
+    result += "C BAT=";
+    result += String(bat, 0);
+    result += "C TRF=";
+    result += String(trf, 0);
+    result += "C fields=";
+    result += count;
+    return result;
 }
 
 String PI_Serial::requestData(String command)
