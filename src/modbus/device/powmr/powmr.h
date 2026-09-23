@@ -64,6 +64,7 @@ private:
         {4536, MODBUS_TYPE_HOLDING, REGISTER_TYPE_CUSTOM_VAL_NAME_SWAP, DESCR_Charger_Source_Priority, 0, {.bitfield = {"Utility first", "Solar first", "Solar and Utility", "Solar only"}}, nullptr, kSettingsBlockStart, kSettingsBlockCount},
         {4537, MODBUS_TYPE_HOLDING, REGISTER_TYPE_CUSTOM_VAL_NAME_SWAP, DESCR_Output_Source_Priority, 0, {.bitfield = {"Utility first", "Solar first", "SBU priority"}}, nullptr, kSettingsBlockStart, kSettingsBlockCount},
         {4538, MODBUS_TYPE_HOLDING, REGISTER_TYPE_CUSTOM_VAL_NAME_SWAP, DESCR_Input_Voltage_Range, 0, {.bitfield = {"Appliances", "UPS"}}, nullptr, kSettingsBlockStart, kSettingsBlockCount},
+        {4539, MODBUS_TYPE_HOLDING, REGISTER_TYPE_CUSTOM_VAL_NAME_SWAP, "Battery_Type", 0, {.bitfield = {"AGM", "FLD", "USE", "LIB", "LIC", "LIP", "LIL"}}, nullptr, kSettingsBlockStart, kSettingsBlockCount},
         {4540, MODBUS_TYPE_HOLDING, REGISTER_TYPE_CUSTOM_VAL_NAME_SWAP, DESCR_AC_Out_Rating_Frequency, 0, {.bitfield = {"50", "60"}}, nullptr, kSettingsBlockStart, kSettingsBlockCount},
         {4541, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, DESCR_Current_Max_Charging_Current, 0, {}, nullptr, kSettingsBlockStart, kSettingsBlockCount},
         {4542, MODBUS_TYPE_HOLDING, REGISTER_TYPE_U16_SWAP, DESCR_AC_Out_Rating_Voltage, 0, {}, nullptr, kSettingsBlockStart, kSettingsBlockCount},
