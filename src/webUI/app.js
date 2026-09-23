@@ -767,6 +767,15 @@ function renderStatus(data) {
   if (victorSbuPanel) {
     victorSbuPanel.hidden = activeProtocol !== "MODBUS_POWMR";
   }
+  const batteryType = pickDataValue(data, ["Battery_Type"], ["DeviceData"]);
+  setText("batteryTypeCurrent", batteryType || "-");
+  const batteryTypeSelect = byId("batteryTypeSelect");
+  if (batteryTypeSelect && batteryType && document.activeElement !== batteryTypeSelect) {
+    const desired = "powmr batterytype " + String(batteryType).toUpperCase();
+    if (Array.from(batteryTypeSelect.options).some((option) => option.value === desired)) {
+      batteryTypeSelect.value = desired;
+    }
+  }
   setText("metricPvPower", formatValue(totalSolarPower(data), " W"));
   setText("metricBatteryPercent", formatValue(data.LiveData?.Battery_Percent, " %"));
   setText("metricBatteryVoltage", formatValue(data.LiveData?.Battery_Voltage ?? data.LiveData?.Positive_Battery_Voltage, " V"));
@@ -1072,6 +1081,20 @@ window.addEventListener("DOMContentLoaded", async () => {
   bindSubmit("deviceForm", async (form) => {
     const result = await postForm("/api/settings/device", form);
     showNotice(result?.message || "Device settings applied.");
+  });
+
+  bindSubmit("batteryTypeForm", async (form) => {
+    await postForm("/api/command", form);
+    const data = await waitForCommandAnswer();
+    const answer = data.RawData?.CommandAnswer || "";
+    if (answer.startsWith("OK:")) {
+      showNotice(answer);
+      await loadStatus();
+    } else if (answer) {
+      showNotice(answer, true);
+    } else {
+      showNotice("Battery type command sent. No answer received yet.", true);
+    }
   });
 
   bindSubmit("commandForm", async (form) => {
