@@ -80,6 +80,11 @@ private:
     int _txPin;
     ModbusDevice *device = nullptr; 
     MODBUS_COM _mCom;
+
+    volatile bool _powmrDumpRunning = false;
+    volatile bool _powmrDumpReady = false;
+    String _powmrDumpResult;
+    TaskHandle_t _powmrDumpTask = nullptr;
 };
 
 #endif
