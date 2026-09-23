@@ -74,7 +74,7 @@ void MODBUS_COM::setResponseTimeout(uint16_t timeoutMs)
     _mb.setResponseTimeout(timeoutMs);
 }
 
-const char *MODBUS_COM::getModbusResultText(uint8_t result)
+const char *MODBUS_COM::getModbusResultText(uint8_t result) const
 {
     switch (result)
     {
