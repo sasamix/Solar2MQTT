@@ -108,6 +108,12 @@ private:
     uint8_t _powmrSocHistoryHead = 0;
     uint8_t _powmrSocHistoryCount = 0;
     unsigned long _powmrSocLastSampleMs = 0;
+
+    static constexpr uint8_t kPowMrWatchCount = 27;
+    uint16_t _powmrWatchValues[kPowMrWatchCount] = {};
+    bool _powmrWatchValid = false;
+    uint32_t _powmrWatchCapturedAt = 0;
+
 };
 
 #endif
