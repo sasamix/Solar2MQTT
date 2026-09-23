@@ -245,6 +245,17 @@ const OVERVIEW_GROUPS = [
     ],
   },
   {
+    title: "PowMr raw",
+    fields: [
+      { label: "4556", keys: ["PowMr_Debug_4556"], decimals: 0 },
+      { label: "4557", keys: ["Inverter_Temperature"], decimals: 0 },
+      { label: "4558", keys: ["PowMr_Debug_4558"], decimals: 0 },
+      { label: "4559", keys: ["PowMr_Debug_4559"], decimals: 0 },
+      { label: "4560", keys: ["PowMr_Debug_4560"], decimals: 0 },
+      { label: "4561", keys: ["PowMr_Debug_4561"], decimals: 0 },
+    ],
+  },
+  {
     title: "Inverter",
     fields: [
       { label: "Mode", keys: ["Inverter_Operation_Mode"], numeric: false },
