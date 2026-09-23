@@ -113,8 +113,8 @@ void MODBUS::powmrDumpTask(void *param)
 void MODBUS::runPowmrDump()
 {
     String answer;
-    answer.reserve(9000);
-    answer = "POWMR_DUMP BEGIN ranges=4500-4565,5000-5099\n";
+    answer.reserve(12000);
+    answer = "POWMR_SCAN BEGIN ranges=4566-4999,5100-5500 (readable only)\n";
 
     uint16_t readable = 0;
     uint16_t failed = 0;
@@ -122,44 +122,47 @@ void MODBUS::runPowmrDump()
     _mCom.setResponseTimeout(250);
     _mCom.clearReadCache();
 
+    _powmrDumpCurrentRegister = 4566;
+    _powmrDumpReadable = 0;
+    _powmrDumpFailed = 0;
+
     ModbusMaster *mb = _mCom.getModbusMaster();
 
     auto scanRange = [&](uint16_t first, uint16_t last) {
         for (uint16_t reg = first; reg <= last; ++reg)
         {
+            _powmrDumpCurrentRegister = reg;
             const uint8_t result = mb->readHoldingRegisters(reg, 1);
             if (result == mb->ku8MBSuccess)
             {
                 const uint16_t raw = mb->getResponseBuffer(0);
                 const uint16_t swapped = static_cast<uint16_t>((raw >> 8) | (raw << 8));
-                char line[72];
+                char line[88];
                 snprintf(line, sizeof(line),
-                         "reg=%u raw=%u swap=%u hex=0x%04X\n",
+                         "reg=%u raw=%u swap=%u hex=0x%04X%s\n",
                          static_cast<unsigned int>(reg),
                          static_cast<unsigned int>(raw),
                          static_cast<unsigned int>(swapped),
-                         static_cast<unsigned int>(raw));
+                         static_cast<unsigned int>(raw),
+                         (raw == 30 || raw == 70 || swapped == 30 || swapped == 70) ? " MATCH_30_70" : "");
                 answer += line;
                 readable++;
+                _powmrDumpReadable = readable;
             }
             else
             {
-                char line[36];
-                snprintf(line, sizeof(line), "reg=%u X result=%u\n",
-                         static_cast<unsigned int>(reg),
-                         static_cast<unsigned int>(result));
-                answer += line;
                 failed++;
+                _powmrDumpFailed = failed;
             }
 
             vTaskDelay(1);
         }
     };
 
-    scanRange(4500, 4565);
-    scanRange(5000, 5099);
+    scanRange(4566, 4999);
+    scanRange(5100, 5500);
 
-    answer += "POWMR_DUMP END readable=";
+    answer += "POWMR_SCAN END readable=";
     answer += readable;
     answer += " failed=";
     answer += failed;
@@ -171,7 +174,7 @@ void MODBUS::runPowmrDump()
     _powmrDumpReady = true;
     _powmrDumpRunning = false;
 
-    writeLog("POWMR_DUMP async complete readable=%u failed=%u",
+    writeLog("POWMR_SCAN async complete readable=%u failed=%u",
              static_cast<unsigned int>(readable),
              static_cast<unsigned int>(failed));
 }
@@ -180,6 +183,85 @@ String MODBUS::requestData(String command)
 {
     requestStaticData = true;
     command.trim();
+
+    // PowMr/Victor battery type (menu 05).
+    // Read:  powmr batterytype
+    // Write: powmr batterytype AGM|FLD|USE|LIB|LIC|LIP|LIL
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        (command == "powmr batterytype" || command.startsWith("powmr batterytype ")))
+    {
+        if (_powmrDumpRunning)
+            return "ERROR: wait for PowMr scan to finish before changing battery type";
+
+        auto batteryTypeName = [](uint16_t value) -> const char * {
+            switch (value)
+            {
+            case 0: return "AGM";
+            case 1: return "FLD";
+            case 2: return "USE";
+            case 3: return "LIB";
+            case 4: return "LIC";
+            case 5: return "LIP";
+            case 6: return "LIL";
+            default: return "UNKNOWN";
+            }
+        };
+
+        if (command == "powmr batterytype")
+        {
+            uint16_t value = 0;
+            _mCom.clearReadCache();
+            if (!_mCom.readHoldingBlock(5020, 1, &value, 1))
+                return "ERROR: unable to read battery type register 5020";
+
+            return String("OK: Battery type = ") + batteryTypeName(value) +
+                   " (" + static_cast<unsigned int>(value) + ")";
+        }
+
+        String requested = command.substring(18);
+        requested.trim();
+        requested.toUpperCase();
+
+        int value = -1;
+        if (requested == "AGM") value = 0;
+        else if (requested == "FLD") value = 1;
+        else if (requested == "USE") value = 2;
+        else if (requested == "LIB") value = 3;
+        else if (requested == "LIC") value = 4;
+        else if (requested == "LIP") value = 5;
+        else if (requested == "LIL") value = 6;
+
+        if (value < 0)
+            return "ERROR: battery type must be AGM/FLD/USE/LIB/LIC/LIP/LIL";
+
+        if (!_mCom.writeHoldingRegister(5020, static_cast<uint16_t>(value)))
+        {
+            const uint8_t result = _mCom.getLastWriteResult();
+            return String("ERROR: battery type write failed result=") +
+                   static_cast<unsigned int>(result) + " (" +
+                   _mCom.getLastWriteResultText() + ")";
+        }
+
+        delay(150);
+        uint16_t readback = 0xFFFF;
+        _mCom.clearReadCache();
+        const bool readOk = _mCom.readHoldingBlock(5020, 1, &readback, 1);
+
+        static_info.curr_register = 0;
+        requestStaticData = true;
+
+        if (!readOk)
+            return String("OK: Battery type write accepted: ") + requested +
+                   "; readback unavailable";
+
+        if (readback != static_cast<uint16_t>(value))
+            return String("ERROR: battery type readback mismatch requested=") +
+                   requested + " actual=" + batteryTypeName(readback) +
+                   " (" + static_cast<unsigned int>(readback) + ")";
+
+        return String("OK: Battery type = ") + batteryTypeName(readback) +
+               " (" + static_cast<unsigned int>(readback) + ")";
+    }
 
     // Guarded first write command for PowMr/Victor.
     // Syntax: powmr charge <amps>
@@ -314,7 +396,7 @@ String MODBUS::requestData(String command)
         }
 
         _powmrDumpTask = handle;
-        return "STARTED: PowMr dump is running; use 'powmr dump result' in about 45 seconds";
+        return "STARTED: wide PowMr scan 4566-4999,5100-5500; use 'powmr dump result' for progress/result";
     }
 
     // SOC threshold writes are intentionally disabled until the exact Victor
