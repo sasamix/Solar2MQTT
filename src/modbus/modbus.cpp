@@ -151,20 +151,56 @@ String MODBUS::requestData(String command)
             return "ERROR: diagnostic range must stay within 5000..5099, max 20 registers";
 
         uint16_t values[20] = {};
-        _mCom.clearReadCache();
-        if (!_mCom.readHoldingBlock(static_cast<uint16_t>(start),
-                                    static_cast<uint16_t>(count),
-                                    values, 20))
-            return "ERROR: Modbus diagnostic read failed";
-
         String answer = "OK:";
+        _mCom.clearReadCache();
+
+        if (_mCom.readHoldingBlock(static_cast<uint16_t>(start),
+                                   static_cast<uint16_t>(count),
+                                   values, 20))
+        {
+            for (int i = 0; i < count; ++i)
+            {
+                answer += " ";
+                answer += String(start + i);
+                answer += "=";
+                answer += String(values[i]);
+            }
+            return answer;
+        }
+
+        // Some Victor/PowMr firmware rejects a block when even one address in
+        // it is unsupported. Fall back to one-register reads and return all
+        // readable values instead of failing the whole command.
+        answer = "PARTIAL:";
+        uint16_t readable = 0;
+        uint16_t failed = 0;
         for (int i = 0; i < count; ++i)
         {
-            answer += " ";
-            answer += String(start + i);
-            answer += "=";
-            answer += String(values[i]);
+            const uint16_t reg = static_cast<uint16_t>(start + i);
+            uint16_t value = 0;
+            _mCom.clearReadCache();
+            if (_mCom.readHoldingBlock(reg, 1, &value, 1))
+            {
+                answer += " ";
+                answer += String(reg);
+                answer += "=";
+                answer += String(value);
+                readable++;
+            }
+            else
+            {
+                answer += " ";
+                answer += String(reg);
+                answer += "=X";
+                failed++;
+            }
         }
+
+        answer += " [readable=";
+        answer += readable;
+        answer += " failed=";
+        answer += failed;
+        answer += "]";
         return answer;
     }
 
