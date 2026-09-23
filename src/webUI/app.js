@@ -1183,9 +1183,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  bindClick("piTempsBtn", async () => {
+  bindClick("bmsDiagBtn", async () => {
     const body = new URLSearchParams();
-    body.set("command", "powmr pitemps");
+    body.set("command", "powmr bmsdiag");
     await fetchJson("/api/command", { method: "POST", body });
     const data = await waitForCommandAnswer();
     const answer = data.RawData?.CommandAnswer || "-";
@@ -1195,14 +1195,15 @@ window.addEventListener("DOMContentLoaded", async () => {
       preview.textContent = JSON.stringify(data || {}, null, 2);
     }
     setText("dataPreviewMeta", `Last updated: ${new Date().toLocaleTimeString("en-GB")}`);
-    if (answer.startsWith("OK:")) {
-      showNotice(answer);
+    if (answer.startsWith("POWMR_BMS_DIAG")) {
+      showNotice("BMS / SOC snapshot loaded.");
     } else if (answer && answer !== "-") {
       showNotice(answer, true);
     } else {
-      showNotice("PI temperature probe sent. No answer received yet.", true);
+      showNotice("BMS / SOC snapshot command sent. No answer received yet.", true);
     }
   });
+
 
   bindClick("rebootBtn", async () => {
     await fetchJson("/api/reboot", { method: "POST" });
