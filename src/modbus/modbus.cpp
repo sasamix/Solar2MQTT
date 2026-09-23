@@ -115,9 +115,9 @@ String MODBUS::requestData(String command)
             return "ERROR: allowed charge current is 10/20/30/40/50/60 A";
         }
 
-        // Register 4541 is byte-swapped on the PowMr map.
-        const uint16_t value = static_cast<uint16_t>(amps);
-        const uint16_t rawValue = static_cast<uint16_t>((value >> 8) | (value << 8));
+        // PowMr control register 5022 is written in normal Modbus word order.
+        // 50 A is value 0x0032; do not byte-swap control-register writes.
+        const uint16_t rawValue = static_cast<uint16_t>(amps);
 
         if (!_mCom.writeHoldingRegister(5022, rawValue))
         {
