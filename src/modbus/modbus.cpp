@@ -137,9 +137,10 @@ void MODBUS::loop()
         if (completedLivePass && device != nullptr && device->getProtocol() == MODBUS_POWMR)
         {
             capturePowmrSocSample();
+            _powmrLivePassCompleted = true;
         }
 
-        if (requestCallback)
+        if (requestCallback && !_powmrLivePassCompleted)
         {
             requestCallback();
         }
