@@ -3,7 +3,6 @@
 #include <ArduinoJson.h>
 #include <initializer_list>
 #include <WiFi.h>
-#include <time.h>
 
 #include "core/SettingsPrefs.h"
 #include "core/SolarState.h"
@@ -16,11 +15,6 @@ extern Settings _settings;
 
 namespace
 {
-constexpr unsigned long kBacklogCaptureIntervalMs = 300000UL;
-constexpr unsigned long kBacklogFlushIntervalMs = 250UL;
-constexpr unsigned long kBacklogAckTimeoutMs = 10000UL;
-constexpr uint32_t kValidEpochFloor = 1700000000UL;
-
 const HaEntityDescriptor *findDescriptor(const char *name,
                                          const HaEntityDescriptor *descriptors,
                                          size_t descriptorCount)
@@ -188,7 +182,7 @@ void populateDeviceInfo(JsonDocument &doc, JsonDocument &snapshot)
     device["sw_version"] = STRVERSION;
 }
 
-bool publishJsonValue(PubSubClient &client, const String &topic, JsonVariantConst value, bool retained = true)
+void publishJsonValue(PubSubClient &client, const String &topic, JsonVariantConst value, bool retained = true)
 {
     String payload;
     if (value.is<bool>())
@@ -211,7 +205,7 @@ bool publishJsonValue(PubSubClient &client, const String &topic, JsonVariantCons
     {
         serializeJson(value, payload);
     }
-    return client.publish(topic.c_str(), payload.c_str(), retained);
+    client.publish(topic.c_str(), payload.c_str(), retained);
 }
 } // namespace
 
@@ -248,12 +242,6 @@ void MqttHandler::begin()
     _forceHaDiscovery = false;
     _pendingLegacyDs18Cleanup = true;
     _haDiscoveryTopics.clear();
-    _lastBacklogCapture = 0;
-    _lastBacklogFlush = 0;
-    _backlogAwaitingSince = 0;
-    _backlogAwaitingSeq = 0;
-    _timeSyncStarted = false;
-    _backlog.begin();
 }
 
 void MqttHandler::reconfigure()
@@ -272,24 +260,13 @@ void MqttHandler::reconfigure()
     _lastReconnectAttempt = 0;
     _lastAlivePublish = millis();
     _lastStatePublish = millis();
-    _backlogAwaitingSince = 0;
-    _backlogAwaitingSeq = 0;
     _haDiscoveryTopics.clear();
 }
 
 void MqttHandler::loop()
 {
-    if (!_configured)
+    if (!_configured || !_wifiManager.getConnectionState())
     {
-        return;
-    }
-
-    ensureTimeSync();
-
-    if (!_wifiManager.getConnectionState())
-    {
-        captureBacklogIfNeeded(_lastConnected);
-        _lastConnected = false;
         return;
     }
 
@@ -297,11 +274,6 @@ void MqttHandler::loop()
     if (connected)
     {
         _mqtt.loop();
-        flushBacklog();
-    }
-    else
-    {
-        captureBacklogIfNeeded(_lastConnected);
     }
 
     const unsigned long now = millis();
@@ -317,7 +289,7 @@ void MqttHandler::loop()
         _pendingFullPublish = true;
     }
 
-    if (connected && _pendingFullPublish && _backlog.count() == 0 && _backlogAwaitingSeq == 0)
+    if (connected && _pendingFullPublish)
     {
         _pendingFullPublish = false;
         publishState();
@@ -347,11 +319,6 @@ bool MqttHandler::isConnected()
 
 void MqttHandler::triggerFullStatePublish()
 {
-    if (!_mqtt.connected())
-    {
-        captureBacklogIfNeeded(false);
-    }
-
     if (usesImmediateStatePublishing())
     {
         _pendingFullPublish = true;
@@ -366,8 +333,7 @@ void MqttHandler::triggerHaDiscovery()
 
 void MqttHandler::publishSensorImmediate(uint8_t index, float temperature)
 {
-    if (!_mqtt.connected() || !usesImmediateStatePublishing() ||
-        _backlog.count() > 0 || _backlogAwaitingSeq != 0)
+    if (!_mqtt.connected() || !usesImmediateStatePublishing())
     {
         return;
     }
@@ -396,16 +362,6 @@ void MqttHandler::handleMessage(char *topic, uint8_t *payload, unsigned int leng
     }
 
     const String topicString(topic);
-
-    if (topicString == backlogAckTopic())
-    {
-        const uint32_t seq = static_cast<uint32_t>(strtoul(message.c_str(), nullptr, 10));
-        if (seq != 0)
-        {
-            acknowledgeBacklog(seq);
-        }
-        return;
-    }
     if (strlen(_settings.get.mqttTriggerPath()) > 0 && topicString == _settings.get.mqttTriggerPath())
     {
         triggerFullStatePublish();
@@ -428,193 +384,6 @@ uint32_t MqttHandler::statePublishIntervalMs() const
 bool MqttHandler::usesImmediateStatePublishing() const
 {
     return statePublishIntervalMs() == 0;
-}
-
-
-void MqttHandler::ensureTimeSync()
-{
-    if (_timeSyncStarted || !_wifiManager.getConnectionState())
-    {
-        return;
-    }
-
-    configTime(0, 0, "pool.ntp.org", "time.cloudflare.com", "time.nist.gov");
-    _timeSyncStarted = true;
-}
-
-uint32_t MqttHandler::currentEpoch() const
-{
-    const time_t now = time(nullptr);
-    if (now < static_cast<time_t>(kValidEpochFloor))
-    {
-        return 0;
-    }
-    return static_cast<uint32_t>(now);
-}
-
-void MqttHandler::captureBacklogIfNeeded(bool force)
-{
-    if (!_configured || !_backlog.ready())
-    {
-        return;
-    }
-
-    // PubSubClient may still report connected for a short time after Wi-Fi
-    // disappears. Treat loss of the underlying network as offline immediately.
-    if (_wifiManager.getConnectionState() && _mqtt.connected())
-    {
-        return;
-    }
-
-    const unsigned long now = millis();
-    if (!force &&
-        _lastBacklogCapture != 0 &&
-        static_cast<unsigned long>(now - _lastBacklogCapture) < kBacklogCaptureIntervalMs)
-    {
-        return;
-    }
-
-    JsonDocument snapshot;
-    _state.snapshotTo(snapshot);
-    if (!(snapshot["Status"]["inverterConnected"] | false))
-    {
-        return;
-    }
-
-    JsonObjectConst live = snapshot["LiveData"].as<JsonObjectConst>();
-    if (live.isNull() || live.size() == 0)
-    {
-        return;
-    }
-
-    if (_backlog.capture(live, currentEpoch(), now / 1000UL))
-    {
-        _lastBacklogCapture = now;
-    }
-}
-
-String MqttHandler::backlogAckTopic() const
-{
-    return baseTopic() + "/DeviceControl/Backlog_Ack";
-}
-
-void MqttHandler::flushBacklog()
-{
-    if (!_mqtt.connected() || !_backlog.ready())
-    {
-        return;
-    }
-
-    const unsigned long now = millis();
-
-    if (_backlogAwaitingSeq != 0)
-    {
-        if (static_cast<unsigned long>(now - _backlogAwaitingSince) < kBacklogAckTimeoutMs)
-        {
-            return;
-        }
-
-        writeLog("[MQTT][BACKLOG] ack timeout seq=%lu, retrying",
-                 static_cast<unsigned long>(_backlogAwaitingSeq));
-        _backlogAwaitingSeq = 0;
-        _backlogAwaitingSince = 0;
-    }
-
-    if (_backlog.count() == 0)
-    {
-        return;
-    }
-
-    if (_lastBacklogFlush != 0 &&
-        static_cast<unsigned long>(now - _lastBacklogFlush) < kBacklogFlushIntervalMs)
-    {
-        return;
-    }
-
-    String payload;
-    uint32_t seq = 0;
-    if (!_backlog.peek(payload, seq))
-    {
-        writeLog("[MQTT][BACKLOG] unable to read oldest record");
-        _lastBacklogFlush = now;
-        return;
-    }
-
-    JsonDocument doc;
-    if (deserializeJson(doc, payload))
-    {
-        writeLog("[MQTT][BACKLOG] malformed record seq=%lu",
-                 static_cast<unsigned long>(seq));
-        _lastBacklogFlush = now;
-        return;
-    }
-
-    JsonObjectConst live = doc["live"].as<JsonObjectConst>();
-    if (live.isNull())
-    {
-        _lastBacklogFlush = now;
-        return;
-    }
-
-    bool published = true;
-    for (JsonPairConst entry : live)
-    {
-        const String topic = baseTopic() + "/LiveData/" + entry.key().c_str();
-        if (!publishJsonValue(_mqtt, topic, entry.value(), true))
-        {
-            published = false;
-            break;
-        }
-    }
-
-    if (!published)
-    {
-        writeLog("[MQTT][BACKLOG] publish failed seq=%lu",
-                 static_cast<unsigned long>(seq));
-        _lastBacklogFlush = now;
-        return;
-    }
-
-    const String ackPayload = String(seq);
-    const String ackTopic = backlogAckTopic();
-    if (!_mqtt.publish(ackTopic.c_str(), ackPayload.c_str(), false))
-    {
-        writeLog("[MQTT][BACKLOG] ack marker publish failed seq=%lu",
-                 static_cast<unsigned long>(seq));
-        _lastBacklogFlush = now;
-        return;
-    }
-
-    _backlogAwaitingSeq = seq;
-    _backlogAwaitingSince = now;
-    _lastBacklogFlush = now;
-
-    writeLog("[MQTT][BACKLOG] replayed seq=%lu waiting for broker echo",
-             static_cast<unsigned long>(seq));
-}
-
-void MqttHandler::acknowledgeBacklog(uint32_t seq)
-{
-    if (_backlogAwaitingSeq == 0 || seq != _backlogAwaitingSeq)
-    {
-        return;
-    }
-
-    if (!_backlog.confirm(seq))
-    {
-        writeLog("[MQTT][BACKLOG] confirmation delete failed seq=%lu",
-                 static_cast<unsigned long>(seq));
-        return;
-    }
-
-    _backlogAwaitingSeq = 0;
-    _backlogAwaitingSince = 0;
-
-    if (_backlog.count() == 0)
-    {
-        _pendingFullPublish = true;
-        writeLog("[MQTT][BACKLOG] queue drained; publishing current live state");
-    }
 }
 
 void MqttHandler::configureClient()
@@ -1167,9 +936,6 @@ void MqttHandler::setupSubscriptions()
 {
     const String commandTopic = baseTopic() + "/DeviceControl/Set_Command";
     _mqtt.subscribe(commandTopic.c_str());
-
-    const String ackTopic = backlogAckTopic();
-    _mqtt.subscribe(ackTopic.c_str());
 
     if (strlen(_settings.get.mqttTriggerPath()) > 0)
     {

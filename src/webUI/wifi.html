@@ -134,7 +134,7 @@
         <span>Available Networks</span>
         <button type="button" class="network-refresh-btn" id="refreshNetworksBtn" title="Refresh networks" aria-label="Refresh networks">&#x21bb;</button>
       </div>
-      <div id="networks" class="network-list"><div class="network empty">Press refresh to scan Wi-Fi networks.</div></div>
+      <div id="networks" class="network-list">Loading...</div>
       <div class="inline-info" id="selectedNetworkHint">Selected network: none</div>
     </div>
 
@@ -714,9 +714,8 @@
     setAdvancedOpen(false);
     updateSelectedNetworkHint();
     (async () => {
-      // Avoid an automatic RF scan when this page opens. On mesh networks
-      // that scan can briefly disturb the active STA connection.
       await loadConfig();
+      await loadNetworks(false, true);
     })();
   </script>
 </body>

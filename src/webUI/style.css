@@ -68,7 +68,7 @@ a {
 
 #header {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) minmax(74px, auto);
+  grid-template-columns: 36px minmax(0, 1fr) 48px;
   align-items: center;
   column-gap: 10px;
   margin: 8px 0 14px;
@@ -89,7 +89,7 @@ a {
 .language-toggle {
   position: static;
   justify-self: end;
-  min-width: 72px;
+  min-width: 40px;
   height: 30px;
   padding: 0 10px;
   border: 1px solid var(--border-strong);
@@ -110,12 +110,12 @@ a {
 
 @media (max-width: 420px) {
   #header {
-    grid-template-columns: 30px minmax(0, 1fr) minmax(64px, auto);
+    grid-template-columns: 30px minmax(0, 1fr) 42px;
     column-gap: 7px;
   }
 
   .language-toggle {
-    min-width: 62px;
+    min-width: 36px;
     padding: 0 8px;
   }
 }

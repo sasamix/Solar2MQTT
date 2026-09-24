@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "solar/HaDiscoveryCatalog.h"
-#include "core/TelemetryBacklog.h"
 
 class SolarState;
 class WiFiManager;
@@ -49,13 +48,6 @@ private:
     unsigned long _lastReconnectAttempt;
     unsigned long _lastAlivePublish;
     unsigned long _lastStatePublish;
-    TelemetryBacklog _backlog;
-    unsigned long _lastBacklogCapture;
-    unsigned long _lastBacklogFlush;
-    unsigned long _backlogAwaitingSince;
-    uint32_t _backlogAwaitingSeq;
-    bool _timeSyncStarted;
-
     std::vector<String> _haDiscoveryTopics;
 
     static void globalCallback(char *topic, uint8_t *payload, unsigned int length);
@@ -63,12 +55,6 @@ private:
 
     void configureClient();
     bool ensureConnected();
-    void captureBacklogIfNeeded(bool force = false);
-    void flushBacklog();
-    void acknowledgeBacklog(uint32_t seq);
-    String backlogAckTopic() const;
-    uint32_t currentEpoch() const;
-    void ensureTimeSync();
     uint32_t statePublishIntervalMs() const;
     bool usesImmediateStatePublishing() const;
     void publishAlive();

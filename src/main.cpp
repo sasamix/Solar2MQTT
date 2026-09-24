@@ -114,9 +114,7 @@ void setup()
         webServerHandler.setInverterConnected(inverterService.isConnected());
         mqttHandler.triggerFullStatePublish();
         webServerHandler.notifyStatusBar(); });
-    // Keep inverter polling active even while Wi-Fi is in recovery AP mode.
-    // Offline telemetry must continue so MQTT backlog can be recorded.
-    inverterService.setTransportPaused(false);
+    inverterService.setTransportPaused(wifiManager.isInApMode());
     inverterService.begin();
 
     ds18b20Service.setCallback([](uint8_t index, float temperature)
@@ -163,7 +161,7 @@ void loop()
         }
         webServerHandler.notifyStatusBar();
     }
-    inverterService.setTransportPaused(false);
+    inverterService.setTransportPaused(wifiManager.isInApMode());
     inverterService.loop();
     ds18b20Service.loop();
     internalTemperatureService.loop();
