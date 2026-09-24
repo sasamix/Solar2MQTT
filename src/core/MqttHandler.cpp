@@ -16,7 +16,7 @@ extern Settings _settings;
 
 namespace
 {
-constexpr unsigned long kBacklogCaptureIntervalMs = 120000UL;
+constexpr unsigned long kBacklogCaptureIntervalMs = 300000UL;
 constexpr unsigned long kBacklogFlushIntervalMs = 250UL;
 constexpr unsigned long kBacklogAckTimeoutMs = 10000UL;
 constexpr uint32_t kValidEpochFloor = 1700000000UL;
