@@ -98,7 +98,7 @@ jobs:
         with:
           name: Solar2MQTT-m5stack-atom-lite
           path: |
+            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Y.bin.ota
             .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Y.bin
-            .firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.14Y.zip.ota
-            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Y.bin
+            .firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.14Y.zip
           if-no-files-found: error
