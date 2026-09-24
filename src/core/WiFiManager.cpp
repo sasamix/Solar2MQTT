@@ -22,7 +22,9 @@ DNSServer dnsServer;
 IPAddress apIp(192, 168, 4, 1);
 
 constexpr unsigned long kNetworkCheckIntervalMs = 2000UL;
-constexpr unsigned long kReconnectIntervalMs = 15000UL;
+constexpr unsigned long kReconnectFastIntervalMs = 15000UL;
+constexpr unsigned long kReconnectSlowIntervalMs = 60000UL;
+constexpr uint8_t kReconnectFastAttempts = 20;
 constexpr unsigned long kRoamCheckIntervalMs = 300000UL;
 constexpr unsigned long kPrimaryRecoveryCheckIntervalMs = 60000UL;
 constexpr int kRoamPoorRssiDbm = -72;
@@ -215,6 +217,7 @@ void WiFiManager::loop()
             _isApMode = false;
         }
         _lastReconnectAttemptMs = 0;
+        _reconnectFailures = 0;
         maybeRoamToBetterAp();
         return;
     }
@@ -227,8 +230,13 @@ void WiFiManager::loop()
         _lastReconnectAttemptMs = 0;
     }
 
+    const unsigned long reconnectInterval =
+        (_reconnectFailures < kReconnectFastAttempts)
+            ? kReconnectFastIntervalMs
+            : kReconnectSlowIntervalMs;
+
     if (_lastReconnectAttemptMs != 0 &&
-        static_cast<unsigned long>(now - _lastReconnectAttemptMs) < kReconnectIntervalMs)
+        static_cast<unsigned long>(now - _lastReconnectAttemptMs) < reconnectInterval)
     {
         return;
     }
@@ -245,11 +253,18 @@ void WiFiManager::loop()
         WiFi.mode(WIFI_STA);
         _isApMode = false;
         _lastReconnectAttemptMs = 0;
+        _reconnectFailures = 0;
         refreshMdns();
     }
     else
     {
-        LogSerial.println(F("[Network] Reconnect failed; AP stays active, will retry"));
+        if (_reconnectFailures < 255)
+            _reconnectFailures++;
+        LogSerial.printf("[Network] Reconnect failed; AP stays active, retry in %lu s\n",
+                         static_cast<unsigned long>(
+                             (_reconnectFailures < kReconnectFastAttempts)
+                                 ? kReconnectFastIntervalMs / 1000UL
+                                 : kReconnectSlowIntervalMs / 1000UL));
     }
 }
 
@@ -278,6 +293,7 @@ void WiFiManager::reconfigure()
     _isApMode = false;
     _lastReconnectAttemptMs = 0;
     _lastRoamCheckMs = 0;
+    _reconnectFailures = 0;
     delay(50);
 
     applySavedNetworkConfig();
