@@ -67,26 +67,28 @@ a {
 }
 
 #header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 48px;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
+  column-gap: 10px;
   margin: 8px 0 14px;
+  min-height: 34px;
 }
 
+#header > a {
+  justify-self: start;
+  display: flex;
+  align-items: center;
+}
 
-#header {
-  position: relative;
-  min-height: 34px;
-  padding-left: 48px;
-  padding-right: 48px;
+#header h1 {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .language-toggle {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  position: static;
+  justify-self: end;
   min-width: 40px;
   height: 30px;
   padding: 0 10px;
@@ -97,6 +99,7 @@ a {
   font: inherit;
   font-size: 12px;
   font-weight: 700;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -107,8 +110,8 @@ a {
 
 @media (max-width: 420px) {
   #header {
-    padding-left: 44px;
-    padding-right: 44px;
+    grid-template-columns: 30px minmax(0, 1fr) 42px;
+    column-gap: 7px;
   }
 
   .language-toggle {
