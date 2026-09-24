@@ -1220,7 +1220,41 @@ bool PI_Serial::sendCustomCommand()
     if (customCommandBuffer == "")
         return false;
 
-    if (isModbus())
+    if (isModbus() && protocol == MODBUS_POWMR &&
+        customCommandBuffer.startsWith("powmr pi "))
+    {
+        String piCommand = customCommandBuffer.substring(9);
+        piCommand.trim();
+        if (piCommand.isEmpty())
+        {
+            get.raw.commandAnswer = "ERROR: syntax powmr pi <PI30-command>";
+        }
+        else
+        {
+            // PowMr/Victor exposes both Modbus RTU and a Voltronic-like PI30
+            // command interface on the same 2400-baud UART. Temporarily parse
+            // the reply as PI30 without changing the active Modbus protocol.
+            const protocol_type_t savedProtocol = protocol;
+            const char *savedStartChar = startChar;
+            const char *savedDelimiter = delimiter;
+            const unsigned int savedBaud = serialIntfBaud;
+
+            protocol = PI30_MAX;
+            startChar = "(";
+            delimiter = " ";
+            serialIntfBaud = 2400;
+            this->my_serialIntf->begin(serialIntfBaud, SERIAL_8N1, _rxPin, _txPin);
+            get.raw.commandAnswer = requestData(piCommand);
+
+            protocol = savedProtocol;
+            startChar = savedStartChar;
+            delimiter = savedDelimiter;
+            serialIntfBaud = savedBaud;
+            this->my_serialIntf->begin(serialIntfBaud == 0 ? 2400 : serialIntfBaud,
+                                      SERIAL_8N1, _rxPin, _txPin);
+        }
+    }
+    else if (isModbus())
     {
         get.raw.commandAnswer = modbus->requestData(customCommandBuffer);
     }
