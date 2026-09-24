@@ -2,7 +2,6 @@
 
 #include <ArduinoJson.h>
 #include <initializer_list>
-#include <Preferences.h>
 #include <WiFi.h>
 
 #include "core/SettingsPrefs.h"
@@ -16,37 +15,6 @@ extern Settings _settings;
 
 namespace
 {
-constexpr const char *kEnergyPvTotalKey = "Local_PV_Energy_Total";
-constexpr const char *kEnergyLoadTotalKey = "Local_Load_Energy_Total";
-constexpr const char *kEnergyBatteryChargeTotalKey = "Local_Battery_Charge_Energy_Total";
-constexpr const char *kEnergyBatteryDischargeTotalKey = "Local_Battery_Discharge_Energy_Total";
-constexpr unsigned long kEnergyUpdateIntervalMs = 5000UL;
-constexpr unsigned long kEnergyPersistIntervalMs = 300000UL;
-
-struct EnergyStoreBlob
-{
-    uint32_t magic;
-    double pvWh;
-    double loadWh;
-    double batteryChargeWh;
-    double batteryDischargeWh;
-};
-
-constexpr uint32_t kEnergyStoreMagic = 0x53454E47UL; // "SENG"
-
-double firstNumeric(JsonObjectConst object, std::initializer_list<const char *> keys)
-{
-    for (const char *key : keys)
-    {
-        JsonVariantConst value = object[key];
-        if (!value.isNull() && (value.is<float>() || value.is<double>() || value.is<int>() || value.is<long>() || value.is<unsigned int>() || value.is<unsigned long>()))
-        {
-            return value.as<double>();
-        }
-    }
-    return 0.0;
-}
-
 const HaEntityDescriptor *findDescriptor(const char *name,
                                          const HaEntityDescriptor *descriptors,
                                          size_t descriptorCount)
@@ -274,9 +242,6 @@ void MqttHandler::begin()
     _forceHaDiscovery = false;
     _pendingLegacyDs18Cleanup = true;
     _haDiscoveryTopics.clear();
-    loadEnergyTotals();
-    _lastEnergyUpdateMs = millis();
-    _lastEnergyPersistMs = millis();
 }
 
 void MqttHandler::reconfigure()
@@ -300,8 +265,6 @@ void MqttHandler::reconfigure()
 
 void MqttHandler::loop()
 {
-    updateEnergyTotals();
-
     if (!_configured || !_wifiManager.getConnectionState())
     {
         return;
@@ -423,137 +386,6 @@ bool MqttHandler::usesImmediateStatePublishing() const
     return statePublishIntervalMs() == 0;
 }
 
-
-void MqttHandler::loadEnergyTotals()
-{
-    Preferences prefs;
-    if (!prefs.begin("energycache", true))
-    {
-        return;
-    }
-
-    EnergyStoreBlob blob = {};
-    const size_t len = prefs.getBytesLength("totals");
-    if (len == sizeof(blob))
-    {
-        prefs.getBytes("totals", &blob, sizeof(blob));
-        if (blob.magic == kEnergyStoreMagic)
-        {
-            _energyPvWh = blob.pvWh;
-            _energyLoadWh = blob.loadWh;
-            _energyBatteryChargeWh = blob.batteryChargeWh;
-            _energyBatteryDischargeWh = blob.batteryDischargeWh;
-        }
-    }
-    prefs.end();
-}
-
-void MqttHandler::persistEnergyTotals(bool force)
-{
-    const unsigned long now = millis();
-    if (!force &&
-        _lastEnergyPersistMs != 0 &&
-        static_cast<unsigned long>(now - _lastEnergyPersistMs) < kEnergyPersistIntervalMs)
-    {
-        return;
-    }
-
-    EnergyStoreBlob blob = {
-        kEnergyStoreMagic,
-        _energyPvWh,
-        _energyLoadWh,
-        _energyBatteryChargeWh,
-        _energyBatteryDischargeWh};
-
-    Preferences prefs;
-    if (prefs.begin("energycache", false))
-    {
-        prefs.putBytes("totals", &blob, sizeof(blob));
-        prefs.end();
-        _lastEnergyPersistMs = now;
-    }
-}
-
-void MqttHandler::updateEnergyTotals()
-{
-    const unsigned long now = millis();
-    if (_lastEnergyUpdateMs == 0)
-    {
-        _lastEnergyUpdateMs = now;
-        return;
-    }
-
-    const unsigned long elapsedMs = static_cast<unsigned long>(now - _lastEnergyUpdateMs);
-    if (elapsedMs < kEnergyUpdateIntervalMs)
-    {
-        return;
-    }
-    _lastEnergyUpdateMs = now;
-
-    // Do not integrate stale values if the inverter itself is offline.
-    JsonDocument snapshot;
-    _state.snapshotTo(snapshot);
-    if (!(snapshot["Status"]["inverterConnected"] | false))
-    {
-        persistEnergyTotals(false);
-        return;
-    }
-
-    JsonObjectConst live = snapshot["LiveData"].as<JsonObjectConst>();
-
-    double pvW = firstNumeric(live, {
-        DESCR_PV_Input_Power,
-        DESCR_PV_Charging_Power,
-        DESCR_SCC_Charge_Power});
-    double loadW = firstNumeric(live, {
-        DESCR_AC_Out_Watt,
-        DESCR_Output_Power,
-        DESCR_AC_Output_Power});
-
-    double batteryChargeW = firstNumeric(live, {
-        DESCR_Battery_Charging_Power});
-    double batteryDischargeW = firstNumeric(live, {
-        DESCR_Battery_Average_Power});
-
-    const double batteryV = firstNumeric(live, {DESCR_Battery_Voltage});
-    if (batteryV > 0.0)
-    {
-        if (batteryChargeW <= 0.0)
-        {
-            const double chargeA = firstNumeric(live, {
-                DESCR_Battery_Charge_Current,
-                DESCR_Charge_Average_Current});
-            if (chargeA > 0.0)
-                batteryChargeW = batteryV * chargeA;
-        }
-
-        if (batteryDischargeW <= 0.0)
-        {
-            const double dischargeA = firstNumeric(live, {
-                DESCR_Battery_Discharge_Current,
-                DESCR_Battery_Load});
-            if (dischargeA > 0.0)
-                batteryDischargeW = batteryV * dischargeA;
-        }
-    }
-
-    const double hours = static_cast<double>(elapsedMs) / 3600000.0;
-    if (pvW > 0.0) _energyPvWh += pvW * hours;
-    if (loadW > 0.0) _energyLoadWh += loadW * hours;
-    if (batteryChargeW > 0.0) _energyBatteryChargeWh += batteryChargeW * hours;
-    if (batteryDischargeW > 0.0) _energyBatteryDischargeWh += batteryDischargeW * hours;
-
-    persistEnergyTotals(false);
-}
-
-void MqttHandler::appendEnergyTotals(JsonDocument &snapshot)
-{
-    JsonObject live = snapshot["LiveData"].to<JsonObject>();
-    live[kEnergyPvTotalKey] = _energyPvWh / 1000.0;
-    live[kEnergyLoadTotalKey] = _energyLoadWh / 1000.0;
-    live[kEnergyBatteryChargeTotalKey] = _energyBatteryChargeWh / 1000.0;
-    live[kEnergyBatteryDischargeTotalKey] = _energyBatteryDischargeWh / 1000.0;
-}
 
 void MqttHandler::configureClient()
 {
