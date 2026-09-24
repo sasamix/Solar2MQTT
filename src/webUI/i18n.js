@@ -215,6 +215,36 @@
       "Inverter offline": "Инвертор отключён",
       "Status": "Состояние",
 
+      "Firmware & Backup": "Прошивка и резервная копия",
+      "Online Update": "Онлайн-обновление",
+      "Check for updates from GitHub and install the latest OTA package.": "Проверить обновления на GitHub и установить последний OTA-пакет.",
+      "Update Now": "Обновить сейчас",
+      "Manual Firmware Update": "Ручное обновление прошивки",
+      "Select a firmware file (*.ota) and start the update.": "Выберите файл прошивки (*.ota) и запустите обновление.",
+      "The device will reboot automatically after a successful upload.": "После успешной загрузки устройство автоматически перезагрузится.",
+      "Choose Firmware (.ota)": "Выбрать прошивку (.ota)",
+      "Backup & Restore": "Резервная копия и восстановление",
+      "Download all settings as JSON or restore from a previously saved file.": "Скачать все настройки в JSON или восстановить их из ранее сохранённого файла.",
+      "On restore the current settings are overwritten and the device may reboot if required.": "При восстановлении текущие настройки будут перезаписаны; при необходимости устройство перезагрузится.",
+      "Download configuration": "Скачать конфигурацию",
+      "Restore configuration": "Восстановить конфигурацию",
+      "Back to menu": "Назад в меню",
+      "Command Sender": "Отправка команд",
+      "Send": "Отправить",
+      "Actions": "Действия",
+      "HA Discovery": "Обнаружение HA",
+      "Download Report": "Скачать отчёт",
+      "Refresh Preview": "Обновить просмотр",
+      "SOC History": "История SOC",
+      "Reboot": "Перезагрузить",
+      "Loopback Status": "Состояние Loopback",
+      "Loaded automatically ...": "Загружено автоматически ...",
+      "Loading ...": "Загрузка ...",
+      "Browser Console": "Консоль браузера",
+      "Copy Log": "Копировать лог",
+      "Live log output via the `/webserialws` WebSocket endpoint.": "Вывод журнала в реальном времени через WebSocket `/webserialws`.",
+      "Send Command": "Отправить команду",
+      "Apply": "Применить",
       "Switch language": "Переключить язык"
     }
   };
@@ -260,8 +290,14 @@
     return text;
   }
 
+  function shouldSkipNode(node) {
+    const parent = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+    if (!parent) return false;
+    return Boolean(parent.closest("script, style"));
+  }
+
   function translateTextNode(node) {
-    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+    if (!node || node.nodeType !== Node.TEXT_NODE || shouldSkipNode(node)) return;
     const raw = node.nodeValue;
     if (!raw || !raw.trim()) return;
 
@@ -281,7 +317,7 @@
   }
 
   function translateAttributes(element) {
-    if (!(element instanceof Element)) return;
+    if (!(element instanceof Element) || shouldSkipNode(element)) return;
     const attrs = ["title", "aria-label", "placeholder"];
 
     let originals = attrOriginal.get(element);
