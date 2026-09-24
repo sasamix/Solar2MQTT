@@ -26,6 +26,8 @@ private:
     AsyncWebServer &_server;
     bool _isApMode;
     bool _ethActive;
+    unsigned long _disconnectedSinceMs = 0;
+    unsigned long _lastReconnectKickMs = 0;
 
     bool connectToWifi();
     void startApMode();
