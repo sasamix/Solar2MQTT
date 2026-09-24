@@ -252,6 +252,19 @@
       "limit state publishes to the configured interval.": "ограничивают публикацию состояния указанным интервалом.",
       "Select a firmware file (*.ota) and start the update. The device will reboot automatically after a successful upload.": "Выберите файл прошивки (*.ota) и запустите обновление. После успешной загрузки устройство автоматически перезагрузится.",
       "Download all settings as JSON or restore from a previously saved file. On restore the current settings are overwritten and the device may reboot if required.": "Скачайте все настройки в JSON или восстановите их из ранее сохранённого файла. При восстановлении текущие настройки будут перезаписаны; при необходимости устройство перезагрузится.",
+      "Solar 2": "Солнце 2",
+      "Please select a firmware file first.": "Сначала выберите файл прошивки.",
+      "Please select a settings file first.": "Сначала выберите файл настроек.",
+      "HA discovery triggered.": "Обнаружение Home Assistant запущено.",
+      "Report form opened.": "Форма добавления поддерживаемого устройства открыта.",
+      "JSON data loaded.": "JSON-данные загружены.",
+      "SOC history loaded.": "История SOC загружена.",
+      "SOC history command sent. No answer received yet.": "Команда истории SOC отправлена. Ответ пока не получен.",
+      "Register watch snapshot loaded.": "Снимок отслеживания регистров загружен.",
+      "Register watch command sent. No answer received yet.": "Команда отслеживания регистров отправлена. Ответ пока не получен.",
+      "Reboot triggered.": "Перезагрузка запущена.",
+      "AP Mode": "Режим точки доступа",
+      "Service ready": "Сервис готов",
             "Switch language": "Переключить язык"
     }
   };
@@ -262,7 +275,9 @@
     [/^Wi-Fi password for (.+)$/, (m) => "Пароль Wi‑Fi для " + m[1]],
     [/^Last updated: (.+)$/, (m) => "Обновлено: " + m[1]],
     [/^Max (.+)$/, (m) => "Макс. " + m[1]],
-    [/^Now (.+)$/, (m) => "Сейчас " + m[1]]
+    [/^Now (.+)$/, (m) => "Сейчас " + m[1]],
+    [/^Saved:\s*(.*)$/, (m) => "Сохранено: " + m[1]],
+    [/^ERROR:\s*(.*)$/, (m) => "ОШИБКА: " + m[1]]
   ];
 
   const textOriginal = new WeakMap();
