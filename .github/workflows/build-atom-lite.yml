@@ -35,7 +35,7 @@ jobs:
           test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14X.bin"
           ls -lh .firmware/
       - name: Upload firmware to GitHub Release
-        if: github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -49,7 +49,7 @@ jobs:
             ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14X.bin.ota" \
             ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14X.bin"
       - name: Remove old diagnostic releases
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
