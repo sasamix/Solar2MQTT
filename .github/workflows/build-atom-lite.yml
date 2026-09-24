@@ -40,7 +40,7 @@ jobs:
           test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin"
           ls -lh .firmware/
       - name: Upload firmware to GitHub Release
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish stable 14W-based runtime as 2.0.18'))
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish 2.0.18'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -55,7 +55,7 @@ jobs:
             ".firmware/Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin.ota" \
             ".firmware/Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin"
       - name: Hide broken releases but preserve tags and history
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish stable 14W-based runtime as 2.0.18'))
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish 2.0.18'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
