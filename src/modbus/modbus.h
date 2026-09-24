@@ -55,6 +55,12 @@ public:
      */
     String requestData(String command);
     bool isDiagnosticBusy() const { return _powmrDumpRunning; }
+    bool consumePowMrLivePassCompleted()
+    {
+        const bool ready = _powmrLivePassCompleted;
+        _powmrLivePassCompleted = false;
+        return ready;
+    }
 
 private:
     static constexpr unsigned long kCommandDelayMs = 200;
@@ -84,11 +90,15 @@ private:
     ModbusDevice *device = nullptr; 
     MODBUS_COM _mCom;
 
+    volatile bool _powmrLivePassCompleted = false;
     volatile bool _powmrDumpRunning = false;
     volatile bool _powmrDumpReady = false;
     volatile uint16_t _powmrDumpCurrentRegister = 0;
     volatile uint16_t _powmrDumpReadable = 0;
     volatile uint16_t _powmrDumpFailed = 0;
+    volatile bool _powmrCustomScan = false;
+    volatile uint16_t _powmrScanStart = 0;
+    volatile uint16_t _powmrScanEnd = 0;
     String _powmrDumpResult;
     TaskHandle_t _powmrDumpTask = nullptr;
 

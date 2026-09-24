@@ -1,5 +1,49 @@
 // #define isDEBUG
 #include "modbus.h"
+
+#include <cerrno>
+#include <cmath>
+#include <cstdlib>
+
+namespace
+{
+bool parseStrictLong(const String &text, long &value)
+{
+    String normalized = text;
+    normalized.trim();
+    if (normalized.isEmpty())
+        return false;
+
+    errno = 0;
+    char *end = nullptr;
+    const char *start = normalized.c_str();
+    const long parsed = strtol(start, &end, 10);
+    if (errno == ERANGE || end == start || end == nullptr || *end != '\0')
+        return false;
+
+    value = parsed;
+    return true;
+}
+
+bool parseStrictFloat(const String &text, float &value)
+{
+    String normalized = text;
+    normalized.trim();
+    if (normalized.isEmpty())
+        return false;
+
+    errno = 0;
+    char *end = nullptr;
+    const char *start = normalized.c_str();
+    const float parsed = strtof(start, &end);
+    if (errno == ERANGE || end == start || end == nullptr || *end != '\0' || !std::isfinite(parsed))
+        return false;
+
+    value = parsed;
+    return true;
+}
+} // namespace
+
  
 //----------------------------------------------------------------------
 //  Public Functions
@@ -93,9 +137,10 @@ void MODBUS::loop()
         if (completedLivePass && device != nullptr && device->getProtocol() == MODBUS_POWMR)
         {
             capturePowmrSocSample();
+            _powmrLivePassCompleted = true;
         }
 
-        if (requestCallback)
+        if (requestCallback && !_powmrLivePassCompleted)
         {
             requestCallback();
         }
@@ -258,8 +303,19 @@ void MODBUS::powmrDumpTask(void *param)
 void MODBUS::runPowmrDump()
 {
     String answer;
-    answer.reserve(14000);
-    answer = "POWMR_DIAG BEGIN holding=4500-4564,5000-5038 readable-only\n";
+    answer.reserve(22000);
+    if (_powmrCustomScan)
+    {
+        answer = "POWMR_SCAN BEGIN holding=";
+        answer += static_cast<unsigned int>(_powmrScanStart);
+        answer += "-";
+        answer += static_cast<unsigned int>(_powmrScanEnd);
+        answer += " readable-only\n";
+    }
+    else
+    {
+        answer = "POWMR_DIAG BEGIN holding=4500-4564,5000-5038 readable-only\n";
+    }
 
     uint16_t readable = 0;
     uint16_t failed = 0;
@@ -311,10 +367,17 @@ void MODBUS::runPowmrDump()
         }
     };
 
-    scanHolding(4500, 4564);
-    scanHolding(5000, 5038);
+    if (_powmrCustomScan)
+    {
+        scanHolding(_powmrScanStart, _powmrScanEnd);
+    }
+    else
+    {
+        scanHolding(4500, 4564);
+        scanHolding(5000, 5038);
+    }
 
-    answer += "POWMR_DIAG END readable=";
+    answer += _powmrCustomScan ? "POWMR_SCAN END readable=" : "POWMR_DIAG END readable=";
     answer += readable;
     answer += " failed=";
     answer += failed;
@@ -324,6 +387,7 @@ void MODBUS::runPowmrDump()
 
     _powmrDumpResult = answer;
     _powmrDumpReady = true;
+    _powmrCustomScan = false;
     _powmrDumpRunning = false;
 
     writeLog("POWMR_DIAG complete readable=%u failed=%u",
@@ -634,7 +698,7 @@ String MODBUS::requestData(String command)
                " (" + static_cast<unsigned int>(readback) + ")";
     }
 
-    // Known PowMr/Victor writable settings mirrored in 50xx control registers.
+    // Known PowMr/Victor writable settings mirrored in 50xx control registers; inputs are parsed strictly.
     // Syntax: powmr setting <name> <value>
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
         command.startsWith("powmr setting "))
@@ -659,8 +723,8 @@ String MODBUS::requestData(String command)
         String displayValue;
 
         auto parseIntRange = [&](int minValue, int maxValue, uint16_t targetReg, const char *unit) -> bool {
-            const int value = valueText.toInt();
-            if (value < minValue || value > maxValue)
+            long value = 0;
+            if (!parseStrictLong(valueText, value) || value < minValue || value > maxValue)
                 return false;
             reg = targetReg;
             raw = static_cast<uint16_t>(value);
@@ -674,8 +738,8 @@ String MODBUS::requestData(String command)
         };
 
         auto parseVoltage = [&](float minValue, float maxValue, uint16_t targetReg) -> bool {
-            const float value = valueText.toFloat();
-            if (value < minValue || value > maxValue)
+            float value = 0.0f;
+            if (!parseStrictFloat(valueText, value) || value < minValue || value > maxValue)
                 return false;
             reg = targetReg;
             raw = static_cast<uint16_t>(lroundf(value * 10.0f));
@@ -704,8 +768,8 @@ String MODBUS::requestData(String command)
         }
         else if (name == "outputfreq")
         {
-            const int hz = valueText.toInt();
-            if (hz == 50 || hz == 60)
+            long hz = 0;
+            if (parseStrictLong(valueText, hz) && (hz == 50 || hz == 60))
             {
                 reg = 5021;
                 raw = hz == 50 ? 0 : 1;
@@ -717,8 +781,8 @@ String MODBUS::requestData(String command)
             valid = parseIntRange(0, 120, 5022, "A");
         else if (name == "outputvoltage")
         {
-            const int volts = valueText.toInt();
-            if (volts == 220 || volts == 230 || volts == 240)
+            long volts = 0;
+            if (parseStrictLong(valueText, volts) && (volts == 220 || volts == 230 || volts == 240))
             {
                 reg = 5023;
                 raw = static_cast<uint16_t>(volts);
@@ -780,7 +844,11 @@ String MODBUS::requestData(String command)
         command.startsWith("powmr charge "))
     {
         const String valueText = command.substring(13);
-        const int amps = valueText.toInt();
+        long amps = 0;
+        if (!parseStrictLong(valueText, amps))
+        {
+            return "ERROR: charge current must be an integer";
+        }
         const bool allowed = amps == 10 || amps == 20 || amps == 30 ||
                              amps == 40 || amps == 50 || amps == 60;
         if (!allowed)
@@ -817,8 +885,11 @@ String MODBUS::requestData(String command)
         const int split = args.indexOf(' ');
         if (split <= 0)
             return "ERROR: syntax powmr read <start> <count>";
-        const int start = args.substring(0, split).toInt();
-        const int count = args.substring(split + 1).toInt();
+        long start = 0;
+        long count = 0;
+        if (!parseStrictLong(args.substring(0, split), start) ||
+            !parseStrictLong(args.substring(split + 1), count))
+            return "ERROR: powmr read start/count must be integers";
         if (start < 4500 || start > 5099 || count < 1 || count > 20 ||
             start + count - 1 > 5099)
             return "ERROR: diagnostic range must stay within 4500..5099, max 20 registers";
@@ -875,6 +946,63 @@ String MODBUS::requestData(String command)
         answer += failed;
         answer += "]";
         return answer;
+    }
+
+    // Read-only asynchronous PowMr/Victor extended holding-register scan.
+    // Syntax: powmr scan <start> <end>; result: powmr scan result.
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command == "powmr scan result")
+    {
+        if (_powmrDumpRunning)
+        {
+            return String("RUNNING: reg=") +
+                   static_cast<unsigned int>(_powmrDumpCurrentRegister) +
+                   " readable=" + static_cast<unsigned int>(_powmrDumpReadable) +
+                   " failed=" + static_cast<unsigned int>(_powmrDumpFailed);
+        }
+        if (!_powmrDumpReady)
+            return "NO RESULT: start with 'powmr scan <start> <end>'";
+        return _powmrDumpResult;
+    }
+
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command.startsWith("powmr scan "))
+    {
+        if (_powmrDumpRunning)
+            return "RUNNING: PowMr diagnostic scan already started";
+
+        String args = command.substring(11);
+        args.trim();
+        const int split = args.indexOf(' ');
+        if (split <= 0)
+            return "ERROR: syntax powmr scan <start> <end>";
+
+        long first = 0;
+        long last = 0;
+        if (!parseStrictLong(args.substring(0, split), first) ||
+            !parseStrictLong(args.substring(split + 1), last))
+            return "ERROR: powmr scan start/end must be integers";
+        if (first < 4000 || last > 6000 || first > last || (last - first + 1) > 500)
+            return "ERROR: scan range must stay within 4000..6000 and contain at most 500 registers";
+
+        _powmrCustomScan = true;
+        _powmrScanStart = static_cast<uint16_t>(first);
+        _powmrScanEnd = static_cast<uint16_t>(last);
+        _powmrDumpReady = false;
+        _powmrDumpResult = "";
+        _powmrDumpRunning = true;
+
+        TaskHandle_t handle = nullptr;
+        if (xTaskCreate(powmrDumpTask, "powmr_scan", 8192, this, 1, &handle) != pdPASS)
+        {
+            _powmrDumpRunning = false;
+            _powmrCustomScan = false;
+            return "ERROR: failed to start PowMr extended scan task";
+        }
+
+        _powmrDumpTask = handle;
+        return String("STARTED: PowMr scan ") + first + "-" + last +
+               "; use 'powmr scan result' for progress/result";
     }
 
     // Read-only asynchronous PowMr/Victor diagnostic dump.
