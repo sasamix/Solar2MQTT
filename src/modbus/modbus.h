@@ -89,6 +89,9 @@ private:
     volatile uint16_t _powmrDumpCurrentRegister = 0;
     volatile uint16_t _powmrDumpReadable = 0;
     volatile uint16_t _powmrDumpFailed = 0;
+    volatile bool _powmrCustomScan = false;
+    volatile uint16_t _powmrScanStart = 0;
+    volatile uint16_t _powmrScanEnd = 0;
     String _powmrDumpResult;
     TaskHandle_t _powmrDumpTask = nullptr;
 
