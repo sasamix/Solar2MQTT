@@ -74,7 +74,7 @@
   async function loadValues() {
     const status = await fetchJson("/api/status");
     if (status.protocol !== "MODBUS_POWMR") {
-      throw new Error("Страница доступна только при активном протоколе MODBUS_POWMR.");
+      throw new Error("This page is available only when MODBUS_POWMR is the active protocol.");
     }
 
     const data = await fetchJson("/api/data");
@@ -87,7 +87,7 @@
       el.value = value;
       initial.set(id, String(el.value));
     }
-    setResult("Значения загружены из инвертора.");
+    setResult("Values loaded from inverter.");
   }
 
   async function sendCommand(command) {
@@ -129,7 +129,7 @@
       }
 
       if (!changed.length) {
-        setResult("Изменений нет.");
+        setResult("No changes.");
         return;
       }
 
@@ -147,11 +147,11 @@
         initial.set(item.id, String(byId(item.id).value));
       }
 
-      setResult("Сохранено:\n" + log.join("\n"));
+      setResult("Saved:\n" + log.join("\n"));
       await sleep(400);
       await loadValues();
     } catch (error) {
-      log.push("ОШИБКА: " + error.message);
+      log.push("ERROR: " + error.message);
       setResult(log.join("\n"), true);
     } finally {
       if (saveBtn) saveBtn.disabled = false;
