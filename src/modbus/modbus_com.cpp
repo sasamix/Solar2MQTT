@@ -537,17 +537,50 @@ response_type_t MODBUS_COM::parseModbusToJson(modbus_register_info_t &register_i
         register_info.curr_register = 0;
         clearReadCache();
     }
+
+    if (register_info.curr_register >= register_info.array_size)
+    {
+        return READ_FAIL;
+    }
+
+    const modbus_register_t *first = &register_info.registers[register_info.curr_register];
+    const uint16_t blockStart = first->read_block_start;
+    const uint16_t blockCount = first->read_block_count;
+
+    bool anyOk = false;
     while (register_info.curr_register < register_info.array_size)
     {
-        bool ret_val = readModbusRegisterToJson(&register_info.registers[register_info.curr_register], register_info.variant);
-        if (ret_val || skip_reg_on_error)
+        const modbus_register_t *reg = &register_info.registers[register_info.curr_register];
+
+        // A physical block read populates the cache for every descriptor in
+        // that block. Decode those cached values immediately, but stop before
+        // the next block so MODBUS::loop() keeps the bus inter-command delay.
+        if (anyOk && blockCount > 0 &&
+            (reg->read_block_start != blockStart || reg->read_block_count != blockCount))
+        {
+            break;
+        }
+
+        const bool ok = readModbusRegisterToJson(reg, register_info.variant);
+        if (ok || skip_reg_on_error)
         {
             register_info.curr_register++;
         }
 
-        return ret_val ? READ_OK : READ_FAIL;
+        if (!ok)
+        {
+            return anyOk ? READ_OK : READ_FAIL;
+        }
+
+        anyOk = true;
+
+        if (blockCount == 0)
+        {
+            break;
+        }
     }
-    return READ_FAIL;
+
+    return anyOk ? READ_OK : READ_FAIL;
 }
 
 bool MODBUS_COM::isAllRegistersRead(modbus_register_info_t &register_info)
