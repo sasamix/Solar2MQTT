@@ -678,7 +678,7 @@ String MODBUS::requestData(String command)
                " (" + static_cast<unsigned int>(readback) + ")";
     }
 
-    // Known PowMr/Victor writable settings mirrored in 50xx control registers.
+    // Known PowMr/Victor writable settings mirrored in 50xx control registers; inputs are parsed strictly.
     // Syntax: powmr setting <name> <value>
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
         command.startsWith("powmr setting "))
