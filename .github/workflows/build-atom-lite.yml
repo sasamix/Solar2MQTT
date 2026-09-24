@@ -35,27 +35,27 @@ jobs:
         run: python tools/package_atom_usb_migration.py
       - name: Verify OTA artifact
         run: |
-          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Z.bin.ota"
-          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Z.bin"
-          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.14Z.zip"
+          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.15.bin.ota"
+          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.15.bin"
+          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.15.zip"
           ls -lh .firmware/
-          unzip -l ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.14Z.zip"
+          unzip -l ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.15.zip"
       - name: Upload firmware to GitHub Release
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish 14Z migration'))
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish 15 stable WiFi'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.event_name == 'release' && github.event.release.tag_name || 'v0.0.0-dev-2.0.14Z' }}"
+          TAG="${{ github.event_name == 'release' && github.event.release.tag_name || 'v0.0.0-dev-2.0.15' }}"
           # Create the versioned release on first publication.
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Solar2MQTT 0.0.0-dev-2.0.14Z" --target "${{ github.sha }}" --notes "ATOM Lite 14Z: Deco/mesh reconnect stabilization, faster live Modbus display updates, LittleFS MQTT backlog, and read-only PowMr diagnostics. Devices already migrated to the dual-OTA partition layout can update normally by OTA. The USB migration ZIP remains available for devices still using the old layout."
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Solar2MQTT 0.0.0-dev-2.0.15" --target "${{ github.sha }}" --notes "ATOM Lite 15: restores the proven 14W Wi-Fi manager, keeps manual-only filtered network scanning, faster live Modbus display updates, LittleFS MQTT backlog, and read-only PowMr diagnostics. Devices already migrated to the dual-OTA partition layout can update normally by OTA. The USB ZIP can also be used as a recovery flash without erase_flash."
           # Delete by asset name first. This avoids gh --clobber using a stale asset ID.
-          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Z.bin.ota" -y 2>/dev/null || true
-          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Z.bin" -y 2>/dev/null || true
-          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.14Z.zip" -y 2>/dev/null || true
+          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.15.bin.ota" -y 2>/dev/null || true
+          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.15.bin" -y 2>/dev/null || true
+          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.15.zip" -y 2>/dev/null || true
           gh release upload "$TAG" \
-            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Z.bin.ota" \
-            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Z.bin" \
-            ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.14Z.zip"
+            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.15.bin.ota" \
+            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.15.bin" \
+            ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.15.zip"
       - name: Remove old diagnostic releases
         if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         env:
@@ -98,7 +98,7 @@ jobs:
         with:
           name: Solar2MQTT-m5stack-atom-lite
           path: |
-            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Z.bin.ota
-            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Z.bin
-            .firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.14Z.zip
+            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.15.bin.ota
+            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.15.bin
+            .firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.15.zip
           if-no-files-found: error
