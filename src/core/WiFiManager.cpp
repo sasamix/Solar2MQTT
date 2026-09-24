@@ -198,7 +198,7 @@ void WiFiManager::loop()
         {
             LogSerial.println(F("[Network] Ethernet active, stopping AP mode"));
             dnsServer.stop();
-            WiFi.softAPdisconnect(true);
+            WiFi.softAPdisconnect(false);
             WiFi.mode(WIFI_STA);
             _isApMode = false;
         }
@@ -212,7 +212,7 @@ void WiFiManager::loop()
             LogSerial.printf("[Network] STA restored, IP: %s; stopping AP mode\n",
                              WiFi.localIP().toString().c_str());
             dnsServer.stop();
-            WiFi.softAPdisconnect(true);
+            WiFi.softAPdisconnect(false);
             WiFi.mode(WIFI_STA);
             _isApMode = false;
         }
@@ -462,11 +462,15 @@ bool WiFiManager::connectToWifi()
     }
 
     WiFi.persistent(false);
-    WiFi.setAutoReconnect(true);
+    // Manual candidate selection and ESP32 auto-reconnect must not run at the
+    // same time. Otherwise a failed primary attempt can still be CONNECTING
+    // when WiFi.begin() tries to configure the fallback candidate.
+    WiFi.setAutoReconnect(false);
     WiFi.mode(_isApMode ? WIFI_AP_STA : WIFI_STA);
     WiFi.setHostname(networkHostName());
     WiFi.setSleep(false);
-    WiFi.disconnect();
+    WiFi.disconnect(false, false);
+    delay(150);
 
     struct Candidate
     {
@@ -567,7 +571,7 @@ bool WiFiManager::connectToWifi()
                    bestBssid,
                    true);
 
-        for (int attempt = 0; attempt < 12; ++attempt)
+        for (int attempt = 0; attempt < 24; ++attempt)
         {
             if (WiFi.status() == WL_CONNECTED)
             {
@@ -576,6 +580,7 @@ bool WiFiManager::connectToWifi()
                                  WiFi.BSSIDstr().c_str(),
                                  WiFi.RSSI(),
                                  WiFi.localIP().toString().c_str());
+                WiFi.setAutoReconnect(true);
                 WiFi.scanDelete();
                 return true;
             }
@@ -585,6 +590,11 @@ bool WiFiManager::connectToWifi()
         LogSerial.printf("[Network] %s SSID connection failed: %s\n",
                          candidate.primary ? "Primary" : "Fallback",
                          candidate.ssid);
+
+        // Abort the timed-out attempt before configuring another candidate.
+        // This prevents ESP_ERR_WIFI_STATE ("STA is connecting").
+        WiFi.disconnect(false, false);
+        delay(250);
     }
 
     WiFi.scanDelete();
