@@ -122,3 +122,7 @@ endlocal
 print(f"USB migration package created: {OUT}")
 for path in sorted(OUT.iterdir()):
     print(f"  {path.name}: {path.stat().st_size} bytes")
+
+zip_base = ROOT / ".firmware" / "Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.14Y"
+archive = shutil.make_archive(str(zip_base), "zip", root_dir=OUT)
+print(f"USB migration ZIP: {archive}")
