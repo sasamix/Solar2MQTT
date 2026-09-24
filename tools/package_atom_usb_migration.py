@@ -30,9 +30,9 @@ Purpose
 One-time migration from the old no-filesystem partition layout to:
   NVS      0x009000..0x00DFFF   (preserved settings)
   OTA data 0x00E000..0x00FFFF
-  app0     0x010000..0x1BFFFF
-  app1     0x1C0000..0x36FFFF
-  LittleFS 0x370000..0x3EFFFF   (512 KiB MQTT backlog)
+  app0     0x010000..0x1CFFFF
+  app1     0x1D0000..0x38FFFF
+  LittleFS 0x390000..0x3EFFFF   (384 KiB MQTT backlog)
   coredump 0x3F0000..0x3FFFFF
 
 IMPORTANT
