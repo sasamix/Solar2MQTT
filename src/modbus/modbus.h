@@ -119,7 +119,7 @@ private:
     uint8_t _powmrSocHistoryCount = 0;
     unsigned long _powmrSocLastSampleMs = 0;
 
-    static constexpr uint8_t kPowMrWatchCount = 27;
+    static constexpr uint8_t kPowMrWatchCount = 46;
     uint16_t _powmrWatchValues[kPowMrWatchCount] = {};
     bool _powmrWatchValid = false;
     uint32_t _powmrWatchCapturedAt = 0;
