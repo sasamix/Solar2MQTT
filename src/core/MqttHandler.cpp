@@ -211,7 +211,7 @@ bool publishJsonValue(PubSubClient &client, const String &topic, JsonVariantCons
     {
         serializeJson(value, payload);
     }
-    client.publish(topic.c_str(), payload.c_str(), retained);
+    return client.publish(topic.c_str(), payload.c_str(), retained);
 }
 } // namespace
 
