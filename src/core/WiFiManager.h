@@ -28,6 +28,7 @@ private:
     bool _ethActive;
     unsigned long _lastReconnectAttemptMs = 0;
     unsigned long _lastRoamCheckMs = 0;
+    unsigned long _disconnectedSinceMs = 0;
     uint8_t _reconnectFailures = 0;
 
     bool connectToWifi();
