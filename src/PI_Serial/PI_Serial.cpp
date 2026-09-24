@@ -440,6 +440,48 @@ bool PI_Serial::loop()
             if (isModbus())
             {
                 modbus->loop();
+
+                // PowMr hybrid supplement: immediately after a complete live
+                // Modbus pass, use the idle UART for one PI30 Q1 request.
+                // Q1 supplements temperatures/fan data; Modbus remains
+                // authoritative for overlapping inverter temperature.
+                if (protocol == MODBUS_POWMR && modbus->consumePowMrLivePassCompleted())
+                {
+                    const bool hadModbusInverterTemp =
+                        !liveData[DESCR_Inverter_Temperature].isNull();
+                    const double modbusInverterTemp =
+                        hadModbusInverterTemp
+                            ? liveData[DESCR_Inverter_Temperature].as<double>()
+                            : 0.0;
+
+                    const protocol_type_t savedProtocol = protocol;
+                    const char *savedStartChar = startChar;
+                    const char *savedDelimiter = delimiter;
+
+                    protocol = PI30_MAX;
+                    startChar = "(";
+                    delimiter = " ";
+                    const bool q1Ok = PIXX_Q1();
+
+                    protocol = savedProtocol;
+                    startChar = savedStartChar;
+                    delimiter = savedDelimiter;
+
+                    if (hadModbusInverterTemp)
+                    {
+                        liveData[DESCR_Inverter_Temperature] = modbusInverterTemp;
+                    }
+
+                    if (!q1Ok)
+                    {
+                        writeLog("[POWMR][HYBRID] Q1 supplemental read failed");
+                    }
+
+                    if (requestCallback)
+                    {
+                        requestCallback();
+                    }
+                }
             }
             else if (isRawOnlyPiProtocol(protocol))
             {
