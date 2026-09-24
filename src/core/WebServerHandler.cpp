@@ -72,13 +72,13 @@ void startAsyncScanIfNeeded(bool force)
 
         s_cacheJson = "";
         s_cacheTs = 0;
-        (void)WiFi.scanNetworks(true, true);
+        (void)WiFi.scanNetworks(true, false);
         return;
     }
 
     if (scanState < 0)
     {
-        (void)WiFi.scanNetworks(true, true);
+        (void)WiFi.scanNetworks(true, false);
     }
 }
 
@@ -95,9 +95,39 @@ void collectIfFinished()
 
     for (int index = 0; index < count; index++)
     {
+        const String ssid = WiFi.SSID(index);
+        if (ssid.isEmpty())
+        {
+            continue;
+        }
+
+        const int rssi = WiFi.RSSI(index);
+        JsonObject existing;
+        for (JsonObject item : networks)
+        {
+            if (String(item["ssid"] | "") == ssid)
+            {
+                existing = item;
+                break;
+            }
+        }
+
+        if (!existing.isNull())
+        {
+            // Mesh systems expose one SSID through many BSSIDs. Keep only
+            // the strongest AP in the normal user-facing list.
+            if (rssi > (existing["rssi"] | -127))
+            {
+                existing["rssi"] = rssi;
+                existing["enc"] = (WiFi.encryptionType(index) != WIFI_AUTH_OPEN);
+                existing["bssid"] = WiFi.BSSIDstr(index);
+            }
+            continue;
+        }
+
         JsonObject entry = networks.add<JsonObject>();
-        entry["ssid"] = WiFi.SSID(index);
-        entry["rssi"] = WiFi.RSSI(index);
+        entry["ssid"] = ssid;
+        entry["rssi"] = rssi;
         entry["enc"] = (WiFi.encryptionType(index) != WIFI_AUTH_OPEN);
         entry["bssid"] = WiFi.BSSIDstr(index);
     }
