@@ -285,15 +285,29 @@
   const attrOriginal = new WeakMap();
   let applying = false;
 
+  function availableLanguages() {
+    return Object.keys(resources).filter((lang) => resources[lang] && typeof resources[lang] === "object");
+  }
+
+  function normalizeLanguageCode(value) {
+    return String(value || "").trim().toLowerCase().split(/[-_]/)[0];
+  }
+
   function detectLanguage() {
-    const saved = localStorage.getItem("solar2mqtt.lang");
-    if (saved === "ru" || saved === "en") return saved;
+    const available = availableLanguages();
+    const saved = normalizeLanguageCode(localStorage.getItem("solar2mqtt.lang"));
+    if (saved && available.includes(saved)) return saved;
 
     const langs = Array.isArray(navigator.languages) && navigator.languages.length
       ? navigator.languages
       : [navigator.language || "en"];
 
-    return langs.some((lang) => String(lang).toLowerCase().startsWith("ru")) ? "ru" : "en";
+    for (const candidate of langs) {
+      const normalized = normalizeLanguageCode(candidate);
+      if (available.includes(normalized)) return normalized;
+    }
+
+    return available.includes("en") ? "en" : (available[0] || "en");
   }
 
   let language = detectLanguage();
@@ -301,15 +315,18 @@
   function translateString(source, lang = language) {
     if (source == null) return source;
     const text = String(source);
-    if (lang === "en") return text;
+    const catalog = resources[lang] || {};
+    if (lang === "en" || Object.keys(catalog).length === 0) return text;
 
     const normalized = text.replace(/\s+/g, " ").trim();
-    const direct = resources.ru[text] !== undefined ? resources.ru[text] : resources.ru[normalized];
+    const direct = catalog[text] !== undefined ? catalog[text] : catalog[normalized];
     if (direct !== undefined) return direct;
 
-    for (const [rule, render] of dynamicRules) {
-      const match = normalized.match(rule);
-      if (match) return render(match);
+    if (lang === "ru") {
+      for (const [rule, render] of dynamicRules) {
+        const match = normalized.match(rule);
+        if (match) return render(match);
+      }
     }
     return text;
   }
@@ -390,32 +407,49 @@
     }
   }
 
-  function renderLanguageButton() {
-    let button = document.getElementById("languageToggleBtn");
-    if (!button) {
+  function languageLabel(code) {
+    return String(code || "").toUpperCase();
+  }
+
+  function renderLanguageSelector() {
+    let select = document.getElementById("languageSelect");
+    if (!select) {
       const header = document.getElementById("header");
       if (!header) return;
-      button = document.createElement("button");
-      button.id = "languageToggleBtn";
-      button.type = "button";
-      button.className = "language-toggle";
-      button.addEventListener("click", () => setLanguage(language === "ru" ? "en" : "ru"));
-      header.appendChild(button);
+
+      select = document.createElement("select");
+      select.id = "languageSelect";
+      select.className = "language-toggle";
+      select.addEventListener("change", () => setLanguage(select.value));
+      header.appendChild(select);
     }
 
-    button.textContent = language === "ru" ? "EN" : "RU";
-    button.title = translateString("Switch language", language);
-    button.setAttribute("aria-label", button.title);
+    const available = availableLanguages();
+    const currentOptions = Array.from(select.options).map((option) => option.value);
+    if (currentOptions.join("|") !== available.join("|")) {
+      select.innerHTML = "";
+      for (const code of available) {
+        const option = document.createElement("option");
+        option.value = code;
+        option.textContent = languageLabel(code);
+        select.appendChild(option);
+      }
+    }
+
+    select.value = available.includes(language) ? language : (available[0] || "en");
+    select.title = translateString("Switch language", language);
+    select.setAttribute("aria-label", select.title);
   }
 
   function setLanguage(lang) {
-    if (lang !== "ru" && lang !== "en") return;
-    language = lang;
-    localStorage.setItem("solar2mqtt.lang", lang);
-    document.documentElement.lang = lang;
+    const normalized = normalizeLanguageCode(lang);
+    if (!availableLanguages().includes(normalized)) return;
+    language = normalized;
+    localStorage.setItem("solar2mqtt.lang", normalized);
+    document.documentElement.lang = normalized;
     translateTree(document.body);
-    renderLanguageButton();
-    window.dispatchEvent(new CustomEvent("solar2mqtt-language-changed", { detail: { language: lang } }));
+    renderLanguageSelector();
+    window.dispatchEvent(new CustomEvent("solar2mqtt-language-changed", { detail: { language: normalized } }));
   }
 
   const observer = new MutationObserver((mutations) => {
@@ -431,6 +465,7 @@
     resources,
     t: translateString,
     getLanguage: () => language,
+    getAvailableLanguages: availableLanguages,
     setLanguage,
     apply: () => translateTree(document.body)
   };
@@ -439,7 +474,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     translateTree(document.body);
-    renderLanguageButton();
+    renderLanguageSelector();
     observer.observe(document.body, {
       subtree: true,
       childList: true,
