@@ -464,23 +464,39 @@ String MODBUS::requestData(String command)
             return "ERROR: wait for PowMr diagnostic scan to finish";
 
         const char *const labels[] = {
-            "candidate menu36 Equalization now",
-            "candidate menu37 BMS function",
-            "candidate menu38 SOC under lock",
-            "candidate menu39 SOC turn to AC",
-            "candidate menu40 SOC turn to DC",
-            "candidate menu41 Restart SOC",
-            "candidate menu42",
+            "hypothesis menu38 SOC under lock",
+            "hypothesis menu39 SOC turn to AC",
+            "hypothesis menu40 SOC turn to DC",
+            "hypothesis menu41 Restart SOC",
+            "hypothesis menu42 BMS protocol",
             "candidate menu43",
             "candidate menu44",
+            "candidate menu45",
+            "candidate menu46",
         };
 
         auto swap16 = [](uint16_t value) -> uint16_t {
             return static_cast<uint16_t>((value >> 8) | (value << 8));
         };
 
-        String answer = "POWMR_SOCMAP READ-ONLY 5034..5042\n";
-        answer.reserve(1800);
+        String answer = "POWMR_SOCMAP READ-ONLY settingsFlags4535 + 5034..5042\n";
+        answer.reserve(1900);
+
+        uint16_t flags4535 = 0;
+        _mCom.clearReadCache();
+        if (_mCom.readHoldingBlock(4535, 1, &flags4535, 1))
+        {
+            answer += "4535 settingsFlags raw=0x";
+            answer += String(flags4535, HEX);
+            answer += " swap=0x";
+            answer += String(swap16(flags4535), HEX);
+            answer += "\n";
+        }
+        else
+        {
+            answer += "4535 settingsFlags NO_RESPONSE\n";
+        }
+
         for (uint8_t i = 0; i < 9; ++i)
         {
             const uint16_t reg = static_cast<uint16_t>(5034 + i);
