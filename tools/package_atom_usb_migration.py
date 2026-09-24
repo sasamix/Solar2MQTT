@@ -74,22 +74,22 @@ if "%~1"=="" (
 )
 set PORT=%~1
 set PIOPY=%USERPROFILE%\.platformio\penv\Scripts\python.exe
-set ESPTOOL=%USERPROFILE%\.platformio\packages\tool-esptoolpy\esptool.py
 if not exist "%PIOPY%" (
   echo PlatformIO Python not found: %PIOPY%
   exit /b 3
 )
-if not exist "%ESPTOOL%" (
-  echo PlatformIO esptool not found: %ESPTOOL%
-  exit /b 4
-)
-echo Flashing migration to %PORT% WITHOUT erasing NVS...
-"%PIOPY%" "%ESPTOOL%" --chip esp32 --port %PORT% --baud 921600 write_flash -z ^
+echo Flashing migration to %PORT% at 115200 WITHOUT erasing NVS...
+"%PIOPY%" -m esptool --chip esp32 --port %PORT% --baud 115200 write-flash -z ^
   0x1000 bootloader.bin ^
   0x8000 partitions.bin ^
   0xe000 boot_app0.bin ^
   0x10000 firmware.bin
-if errorlevel 1 exit /b %errorlevel%
+if errorlevel 1 (
+  echo.
+  echo Flash failed. Make sure esptool is installed in PlatformIO Python:
+  echo   "%PIOPY%" -m pip install esptool
+  exit /b %errorlevel%
+)
 echo.
 echo Migration completed. Do not run erase_flash.
 endlocal
@@ -104,7 +104,7 @@ if "%~1"=="" (
 )
 set PORT=%~1
 echo Flashing migration to %PORT% WITHOUT erasing NVS...
-python -m esptool --chip esp32 --port %PORT% --baud 921600 write_flash -z ^
+python -m esptool --chip esp32 --port %PORT% --baud 115200 write-flash -z ^
   0x1000 bootloader.bin ^
   0x8000 partitions.bin ^
   0xe000 boot_app0.bin ^
