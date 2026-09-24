@@ -107,7 +107,7 @@
       if (latest && latest !== previous) break;
     }
 
-    if (!latest) throw new Error(`Нет ответа на команду: ${command}`);
+    if (!latest) throw new Error(`No answer for command: ${command}`);
     if (!latest.startsWith("OK:")) throw new Error(latest);
     return latest;
   }
