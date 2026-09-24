@@ -22,14 +22,8 @@ DNSServer dnsServer;
 IPAddress apIp(192, 168, 4, 1);
 
 constexpr unsigned long kNetworkCheckIntervalMs = 2000UL;
-constexpr unsigned long kStaReconnectGraceMs = 12000UL;
-constexpr unsigned long kReconnectFastIntervalMs = 15000UL;
-constexpr unsigned long kReconnectSlowIntervalMs = 60000UL;
-constexpr uint8_t kReconnectFastAttempts = 20;
-constexpr unsigned long kRoamCheckIntervalMs = 300000UL;
-constexpr unsigned long kPrimaryRecoveryCheckIntervalMs = 60000UL;
-constexpr int kRoamPoorRssiDbm = -72;
-constexpr int kRoamImprovementDb = 10;
+constexpr unsigned long kStaReconnectGraceMs = 30000UL;
+constexpr unsigned long kReconnectKickIntervalMs = 30000UL;
 
 #if HAS_LAN
 bool s_ethConnected = false;
@@ -187,7 +181,7 @@ void WiFiManager::loop()
 
     static unsigned long lastCheck = 0;
     const unsigned long now = millis();
-    if ((now - lastCheck) < kNetworkCheckIntervalMs)
+    if (static_cast<unsigned long>(now - lastCheck) < kNetworkCheckIntervalMs)
     {
         return;
     }
@@ -197,12 +191,14 @@ void WiFiManager::loop()
     {
         if (_isApMode)
         {
-            LogSerial.println(F("[Network] Ethernet active, stopping AP mode"));
+            LogSerial.println(F("[Network] Ethernet active, stopping recovery AP"));
             dnsServer.stop();
             WiFi.softAPdisconnect(false);
             WiFi.mode(WIFI_STA);
             _isApMode = false;
         }
+        _disconnectedSinceMs = 0;
+        _lastReconnectKickMs = 0;
         return;
     }
 
@@ -210,79 +206,49 @@ void WiFiManager::loop()
     {
         if (_isApMode)
         {
-            LogSerial.printf("[Network] STA restored, IP: %s; stopping AP mode\n",
+            LogSerial.printf("[Network] STA restored, IP: %s; stopping recovery AP\n",
                              WiFi.localIP().toString().c_str());
             dnsServer.stop();
             WiFi.softAPdisconnect(false);
             WiFi.mode(WIFI_STA);
             _isApMode = false;
         }
-        _lastReconnectAttemptMs = 0;
+
         _disconnectedSinceMs = 0;
-        _reconnectFailures = 0;
-        // Do not actively roam a healthy mesh connection. Deco and the ESP32
-        // station stack handle association; forced scans/BSSID switches make
-        // brief RF dips look like full disconnects.
+        _lastReconnectKickMs = 0;
         return;
     }
 
-    if (!_isApMode)
+    // Do not touch a transiently disconnected mesh client. The ESP32 station
+    // auto-reconnect and the mesh controller get a full 30 s to recover.
+    if (_disconnectedSinceMs == 0)
     {
-        if (_disconnectedSinceMs == 0)
-        {
-            _disconnectedSinceMs = now;
-            LogSerial.println(F("[Network] STA link lost; waiting for native mesh auto-reconnect"));
-            WiFi.setAutoReconnect(true);
-            return;
-        }
+        _disconnectedSinceMs = now;
+        LogSerial.println(F("[Network] STA link lost; waiting up to 30 s for native auto-reconnect"));
+        WiFi.setAutoReconnect(true);
+        return;
+    }
 
-        if (static_cast<unsigned long>(now - _disconnectedSinceMs) < kStaReconnectGraceMs)
-        {
-            return;
-        }
-
-        LogSerial.println(F("[Network] STA did not recover within 12 s; starting recovery AP"));
+    if (!_isApMode &&
+        static_cast<unsigned long>(now - _disconnectedSinceMs) >= kStaReconnectGraceMs)
+    {
+        LogSerial.println(F("[Network] STA still offline; starting recovery AP without disconnecting STA"));
         startApMode();
         _isApMode = true;
-        _lastReconnectAttemptMs = 0;
-    }
-
-    const unsigned long reconnectInterval =
-        (_reconnectFailures < kReconnectFastAttempts)
-            ? kReconnectFastIntervalMs
-            : kReconnectSlowIntervalMs;
-
-    if (_lastReconnectAttemptMs != 0 &&
-        static_cast<unsigned long>(now - _lastReconnectAttemptMs) < reconnectInterval)
-    {
+        _lastReconnectKickMs = now;
         return;
     }
 
-    _lastReconnectAttemptMs = now;
-    LogSerial.println(F("[Network] Reconnect attempt: trying saved WiFi networks"));
-
-    if (connectToWifi())
+    // While recovery AP is active, leave STA credentials/state intact. A
+    // periodic reconnect() is enough; do not scan, roam, disconnect or call
+    // WiFi.begin repeatedly.
+    if (_isApMode &&
+        static_cast<unsigned long>(now - _lastReconnectKickMs) >= kReconnectKickIntervalMs)
     {
-        LogSerial.printf("[Network] Reconnected to STA, IP: %s\n",
-                         WiFi.localIP().toString().c_str());
-        dnsServer.stop();
-        WiFi.softAPdisconnect(false);
-        WiFi.mode(WIFI_STA);
-        _isApMode = false;
-        _lastReconnectAttemptMs = 0;
-        _disconnectedSinceMs = 0;
-        _reconnectFailures = 0;
-        refreshMdns();
-    }
-    else
-    {
-        if (_reconnectFailures < 255)
-            _reconnectFailures++;
-        LogSerial.printf("[Network] Reconnect failed; AP stays active, retry in %lu s\n",
-                         static_cast<unsigned long>(
-                             (_reconnectFailures < kReconnectFastAttempts)
-                                 ? kReconnectFastIntervalMs / 1000UL
-                                 : kReconnectSlowIntervalMs / 1000UL));
+        _lastReconnectKickMs = now;
+        LogSerial.println(F("[Network] Recovery AP active; nudging STA reconnect"));
+        WiFi.setAutoReconnect(true);
+        WiFi.reconnect();
     }
 }
 
@@ -306,14 +272,15 @@ void WiFiManager::reconfigure()
     }
 #endif
 
-    WiFi.softAPdisconnect(true);
-    WiFi.disconnect(true, true);
+    // User-requested reconfiguration may replace credentials, but it must not
+    // erase the radio/NVS WiFi state or power the radio off.
+    WiFi.softAPdisconnect(false);
+    WiFi.disconnect(false, false);
+    WiFi.mode(WIFI_STA);
     _isApMode = false;
-    _lastReconnectAttemptMs = 0;
-    _lastRoamCheckMs = 0;
     _disconnectedSinceMs = 0;
-    _reconnectFailures = 0;
-    delay(50);
+    _lastReconnectKickMs = 0;
+    delay(100);
 
     applySavedNetworkConfig();
     refreshMdns();
@@ -474,33 +441,52 @@ bool WiFiManager::initEthernet()
 
 bool WiFiManager::connectToWifi()
 {
-    if (strlen(_settings.get.wifiSsid0()) == 0 && strlen(_settings.get.wifiSsid1()) == 0)
+    const char *primarySsid = _settings.get.wifiSsid0();
+    const char *primaryPass = _settings.get.wifiPassword0();
+    const char *fallbackSsid = _settings.get.wifiSsid1();
+    const char *fallbackPass = _settings.get.wifiPassword1();
+
+    if ((!primarySsid || !primarySsid[0]) && (!fallbackSsid || !fallbackSsid[0]))
     {
         LogSerial.println(F("[Network] No SSIDs configured"));
         return false;
     }
 
     WiFi.persistent(false);
-    WiFi.setAutoReconnect(false);
+    WiFi.setAutoReconnect(true);
     WiFi.mode(_isApMode ? WIFI_AP_STA : WIFI_STA);
     WiFi.setHostname(networkHostName());
     WiFi.setSleep(false);
-    WiFi.disconnect(false, false);
-    delay(150);
+
+    IPAddress ip;
+    IPAddress gw;
+    IPAddress sn;
+    IPAddress dns;
+    const bool useStatic =
+        ip.fromString(_settings.get.staticIP()) &&
+        gw.fromString(_settings.get.staticGW()) &&
+        sn.fromString(_settings.get.staticSN()) &&
+        dns.fromString(_settings.get.staticDNS()) &&
+        ip != IPAddress(0, 0, 0, 0);
+
+    if (useStatic)
+    {
+        WiFi.config(ip, gw, sn, dns);
+    }
 
     struct Candidate
     {
         const char *ssid;
         const char *password;
-        const char *bssid;
         bool primary;
     };
 
     const Candidate candidates[] = {
-        {_settings.get.wifiSsid0(), _settings.get.wifiPassword0(), _settings.get.wifiBssid0(), true},
-        {_settings.get.wifiSsid1(), _settings.get.wifiPassword1(), _settings.get.wifiBssid1(), false},
+        {primarySsid, primaryPass, true},
+        {fallbackSsid, fallbackPass, false},
     };
 
+    bool triedFallback = false;
     for (const Candidate &candidate : candidates)
     {
         if (!candidate.ssid || !candidate.ssid[0])
@@ -509,93 +495,31 @@ bool WiFiManager::connectToWifi()
         }
 
         if (!candidate.primary &&
-            strcmp(candidate.ssid, _settings.get.wifiSsid0()) == 0 &&
+            primarySsid && primarySsid[0] &&
+            strcmp(candidate.ssid, primarySsid) == 0 &&
             strcmp(candidate.password ? candidate.password : "",
-                   _settings.get.wifiPassword0() ? _settings.get.wifiPassword0() : "") == 0)
+                   primaryPass ? primaryPass : "") == 0)
         {
             LogSerial.printf("[Network] Skipping duplicate fallback SSID: %s\n", candidate.ssid);
             continue;
         }
 
-        IPAddress ip;
-        IPAddress gw;
-        IPAddress sn;
-        IPAddress dns;
-        const bool useStatic =
-            ip.fromString(_settings.get.staticIP()) &&
-            gw.fromString(_settings.get.staticGW()) &&
-            sn.fromString(_settings.get.staticSN()) &&
-            dns.fromString(_settings.get.staticDNS()) &&
-            ip != IPAddress(0, 0, 0, 0);
-
-        if (useStatic)
+        if (!candidate.primary)
         {
-            WiFi.config(ip, gw, sn, dns);
+            triedFallback = true;
+            WiFi.disconnect(false, false);
+            delay(250);
         }
 
-        const bool lockRequested = candidate.primary && _settings.get.wifiBssidLock();
+        LogSerial.printf("[Network] Trying %s SSID: %s (mesh-managed AP selection)\n",
+                         candidate.primary ? "primary" : "fallback",
+                         candidate.ssid);
 
-        if (lockRequested)
-        {
-            uint8_t lockedBssid[6] = {};
-            if (!parseBssid(candidate.bssid, lockedBssid))
-            {
-                LogSerial.println(F("[Network] Primary BSSID lock is enabled but stored BSSID is invalid"));
-                continue;
-            }
+        // No explicit scan and no BSSID pinning here. This is deliberate:
+        // mesh systems such as Deco should choose/steer the AP themselves.
+        WiFi.begin(candidate.ssid, candidate.password);
 
-            // Only a manual BSSID lock needs a scan. Normal mesh operation
-            // must connect directly by SSID so Deco/Orbi/etc. can select the
-            // appropriate AP without a blocking full-network scan.
-            const int networkCount = WiFi.scanNetworks(false, false);
-            int lockedIndex = -1;
-            if (networkCount > 0)
-            {
-                for (int i = 0; i < networkCount; ++i)
-                {
-                    const uint8_t *scanBssid = WiFi.BSSID(i);
-                    if (WiFi.SSID(i) == candidate.ssid &&
-                        scanBssid != nullptr &&
-                        memcmp(scanBssid, lockedBssid, 6) == 0)
-                    {
-                        lockedIndex = i;
-                        break;
-                    }
-                }
-            }
-
-            if (lockedIndex < 0)
-            {
-                LogSerial.printf("[Network] Locked BSSID not found for SSID: %s\n", candidate.ssid);
-                WiFi.scanDelete();
-                continue;
-            }
-
-            const int32_t channel = WiFi.channel(lockedIndex);
-            const uint8_t *bestBssid = WiFi.BSSID(lockedIndex);
-            LogSerial.printf("[Network] Trying primary SSID with BSSID lock: %s BSSID=%s channel=%ld\n",
-                             candidate.ssid,
-                             WiFi.BSSIDstr(lockedIndex).c_str(),
-                             static_cast<long>(channel));
-
-            WiFi.begin(candidate.ssid,
-                       candidate.password,
-                       channel > 0 ? channel : 0,
-                       bestBssid,
-                       true);
-            WiFi.scanDelete();
-        }
-        else
-        {
-            LogSerial.printf("[Network] Trying %s SSID: %s (automatic mesh AP selection)\n",
-                             candidate.primary ? "primary" : "fallback",
-                             candidate.ssid);
-            WiFi.begin(candidate.ssid, candidate.password);
-        }
-
-        // Direct SSID association normally completes quickly. Keep enough
-        // room for DHCP without making fallback/recovery feel stalled.
-        for (int attempt = 0; attempt < 20; ++attempt)
+        for (int attempt = 0; attempt < 30; ++attempt)
         {
             if (WiFi.status() == WL_CONNECTED)
             {
@@ -610,149 +534,24 @@ bool WiFiManager::connectToWifi()
             delay(500);
         }
 
-        LogSerial.printf("[Network] %s SSID connection failed: %s\n",
+        LogSerial.printf("[Network] %s SSID connection timeout: %s\n",
                          candidate.primary ? "Primary" : "Fallback",
                          candidate.ssid);
+    }
 
+    // If a distinct fallback was tried and also failed, return the station to
+    // the preferred SSID before enabling recovery AP. Auto-reconnect can then
+    // keep trying the preferred mesh without further scans.
+    if (triedFallback && primarySsid && primarySsid[0])
+    {
         WiFi.disconnect(false, false);
-        delay(250);
+        delay(100);
+        LogSerial.printf("[Network] Returning STA reconnect target to primary SSID: %s\n", primarySsid);
+        WiFi.begin(primarySsid, primaryPass);
     }
 
+    WiFi.setAutoReconnect(true);
     return false;
-}
-
-bool WiFiManager::maybeRoamToBetterAp()
-{
-    if (WiFi.status() != WL_CONNECTED)
-    {
-        return false;
-    }
-
-    const unsigned long now = millis();
-    const String currentSsid = WiFi.SSID();
-    const String primarySsid = _settings.get.wifiSsid0();
-    const bool onPrimary = primarySsid.length() > 0 && currentSsid == primarySsid;
-
-    const unsigned long checkInterval =
-        onPrimary ? kRoamCheckIntervalMs : kPrimaryRecoveryCheckIntervalMs;
-
-    if (_lastRoamCheckMs != 0 &&
-        static_cast<unsigned long>(now - _lastRoamCheckMs) < checkInterval)
-    {
-        return false;
-    }
-    _lastRoamCheckMs = now;
-
-    // A manual BSSID lock applies only to the primary network. While on the
-    // fallback network we still periodically look for the primary SSID.
-    if (onPrimary && _settings.get.wifiBssidLock())
-    {
-        return false;
-    }
-
-    const int currentRssi = WiFi.RSSI();
-
-    // While connected to the preferred network, avoid scans unless signal is
-    // actually poor. This keeps mesh roaming lightweight.
-    if (onPrimary && currentRssi > kRoamPoorRssiDbm)
-    {
-        return false;
-    }
-
-    const int networkCount = WiFi.scanNetworks(false, true);
-    if (networkCount <= 0)
-    {
-        WiFi.scanDelete();
-        return false;
-    }
-
-    String targetSsid = onPrimary ? currentSsid : primarySsid;
-    if (targetSsid.length() == 0)
-    {
-        WiFi.scanDelete();
-        return false;
-    }
-
-    int bestIndex = -1;
-    int bestRssi = -127;
-
-    uint8_t lockedBssid[6] = {};
-    const bool lockRequested = !onPrimary && _settings.get.wifiBssidLock();
-    const bool lockValid = lockRequested && parseBssid(_settings.get.wifiBssid0(), lockedBssid);
-
-    for (int i = 0; i < networkCount; ++i)
-    {
-        if (WiFi.SSID(i) != targetSsid)
-            continue;
-
-        const uint8_t *scanBssid = WiFi.BSSID(i);
-        if (lockRequested)
-        {
-            if (!lockValid || scanBssid == nullptr || memcmp(scanBssid, lockedBssid, 6) != 0)
-                continue;
-        }
-
-        const int candidateRssi = WiFi.RSSI(i);
-        if (candidateRssi > bestRssi)
-        {
-            bestRssi = candidateRssi;
-            bestIndex = i;
-        }
-    }
-
-    if (bestIndex < 0)
-    {
-        WiFi.scanDelete();
-        return false;
-    }
-
-    if (onPrimary && (bestRssi - currentRssi) < kRoamImprovementDb)
-    {
-        WiFi.scanDelete();
-        return false;
-    }
-
-    const uint8_t *bestBssid = WiFi.BSSID(bestIndex);
-    const int32_t channel = WiFi.channel(bestIndex);
-    const String bestBssidText = WiFi.BSSIDstr(bestIndex);
-    const String currentBssid = WiFi.BSSIDstr();
-
-    const char *password = nullptr;
-    if (targetSsid == _settings.get.wifiSsid0())
-        password = _settings.get.wifiPassword0();
-    else if (targetSsid == _settings.get.wifiSsid1())
-        password = _settings.get.wifiPassword1();
-
-    if (password == nullptr)
-    {
-        WiFi.scanDelete();
-        return false;
-    }
-
-    if (!onPrimary)
-    {
-        LogSerial.printf("[Network] Preferred SSID restored: switching %s -> %s, BSSID=%s RSSI=%d dBm\n",
-                         currentSsid.c_str(),
-                         targetSsid.c_str(),
-                         bestBssidText.c_str(),
-                         bestRssi);
-    }
-    else
-    {
-        LogSerial.printf("[Network] Roaming %s -> %s, RSSI %d -> %d dBm\n",
-                         currentBssid.c_str(),
-                         bestBssidText.c_str(),
-                         currentRssi,
-                         bestRssi);
-    }
-
-    WiFi.begin(targetSsid.c_str(),
-               password,
-               channel > 0 ? channel : 0,
-               bestBssid,
-               true);
-    WiFi.scanDelete();
-    return true;
 }
 
 bool WiFiManager::applySavedNetworkConfig()
@@ -776,13 +575,16 @@ bool WiFiManager::applySavedNetworkConfig()
 
 void WiFiManager::startApMode()
 {
-    WiFi.disconnect(true, true);
+    // Recovery AP must coexist with STA. Never disconnect or erase the STA
+    // here: doing so turns a short mesh interruption into a forced outage.
     WiFi.mode(WIFI_AP_STA);
     WiFi.persistent(false);
+    WiFi.setAutoReconnect(true);
     WiFi.softAPConfig(apIp, apIp, IPAddress(255, 255, 255, 0));
     WiFi.softAP(String(SOURCE_NAME) + "-AP");
     dnsServer.start(53, "*", apIp);
-    LogSerial.printf("[Network] AP started on %s\n", WiFi.softAPIP().toString().c_str());
+    LogSerial.printf("[Network] Recovery AP started on %s; STA reconnect remains active\n",
+                     WiFi.softAPIP().toString().c_str());
 }
 
 const char *WiFiManager::networkHostName() const
