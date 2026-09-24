@@ -41,7 +41,7 @@ jobs:
           ls -lh .firmware/
           unzip -l ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.17.zip"
       - name: Upload firmware to GitHub Release
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish 16 stable mesh WiFi'))
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish restored 14W runtime as 2.0.17'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
