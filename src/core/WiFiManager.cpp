@@ -495,6 +495,19 @@ bool WiFiManager::connectToWifi()
             continue;
         }
 
+        // A mesh network commonly exposes the same SSID on many APs. If the
+        // fallback slot contains the same SSID/password as the primary slot,
+        // it is not a real fallback and would only duplicate the connection
+        // attempt.
+        if (!candidate.primary &&
+            strcmp(candidate.ssid, _settings.get.wifiSsid0()) == 0 &&
+            strcmp(candidate.password ? candidate.password : "",
+                   _settings.get.wifiPassword0() ? _settings.get.wifiPassword0() : "") == 0)
+        {
+            LogSerial.printf("[Network] Skipping duplicate fallback SSID: %s\n", candidate.ssid);
+            continue;
+        }
+
         IPAddress ip;
         IPAddress gw;
         IPAddress sn;
@@ -565,11 +578,22 @@ bool WiFiManager::connectToWifi()
                          bestRssi,
                          static_cast<long>(channel));
 
-        WiFi.begin(candidate.ssid,
-                   candidate.password,
-                   channel > 0 ? channel : 0,
-                   bestBssid,
-                   true);
+        if (lockRequested)
+        {
+            WiFi.begin(candidate.ssid,
+                       candidate.password,
+                       channel > 0 ? channel : 0,
+                       bestBssid,
+                       true);
+        }
+        else
+        {
+            // For mesh networks (Deco, Orbi, etc.) do not pin initial
+            // association to one AP/BSSID. Let the station choose among the
+            // APs advertising the SSID; our periodic roam logic can still
+            // move to a better AP later when signal becomes poor.
+            WiFi.begin(candidate.ssid, candidate.password);
+        }
 
         for (int attempt = 0; attempt < 24; ++attempt)
         {
