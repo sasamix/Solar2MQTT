@@ -454,7 +454,14 @@ uint32_t MqttHandler::currentEpoch() const
 
 void MqttHandler::captureBacklogIfNeeded(bool force)
 {
-    if (!_configured || _mqtt.connected() || !_backlog.ready())
+    if (!_configured || !_backlog.ready())
+    {
+        return;
+    }
+
+    // PubSubClient may still report connected for a short time after Wi-Fi
+    // disappears. Treat loss of the underlying network as offline immediately.
+    if (_wifiManager.getConnectionState() && _mqtt.connected())
     {
         return;
     }
