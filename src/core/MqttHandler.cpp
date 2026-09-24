@@ -450,6 +450,31 @@ bool MqttHandler::ensureConnected()
     setupSubscriptions();
     publishAlive();
 
+    // Remove stale Home Assistant entities created by an earlier, incorrect
+    // assumption that PowMr/Victor lithium menu 12/13 values were SOC.
+    // The retained discovery/state topics can otherwise survive firmware
+    // changes and display nonsense such as 510%/540%.
+    {
+        const char *const obsoletePowMrSocKeys[] = {
+            DESCR_Battery_Back_To_Utility_SOC,
+            DESCR_Battery_Back_To_Battery_SOC,
+        };
+        const char *const components[] = {"sensor", "number", "select"};
+        const String deviceId = getHaDeviceId();
+
+        for (const char *key : obsoletePowMrSocKeys)
+        {
+            for (const char *component : components)
+            {
+                const String discoveryTopic = buildDiscoveryTopic(deviceId, component, key);
+                _mqtt.publish(discoveryTopic.c_str(), "", true);
+            }
+
+            const String stateTopic = baseTopic() + "/DeviceData/" + key;
+            _mqtt.publish(stateTopic.c_str(), "", true);
+        }
+    }
+
     if (_pendingLegacyDs18Cleanup)
     {
         JsonDocument snapshot;
