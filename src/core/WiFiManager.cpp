@@ -21,6 +21,9 @@ namespace
 DNSServer dnsServer;
 IPAddress apIp(192, 168, 4, 1);
 
+constexpr unsigned long kNetworkCheckIntervalMs = 2000UL;
+constexpr unsigned long kReconnectIntervalMs = 15000UL;
+
 #if HAS_LAN
 bool s_ethConnected = false;
 
@@ -163,6 +166,7 @@ void WiFiManager::begin()
     WiFi.onEvent(onNetworkEvent);
 #endif
 
+    WiFi.setAutoReconnect(true);
     applySavedNetworkConfig();
     refreshMdns();
 }
@@ -175,11 +179,12 @@ void WiFiManager::loop()
     }
 
     static unsigned long lastCheck = 0;
-    if ((millis() - lastCheck) < 10000UL)
+    const unsigned long now = millis();
+    if ((now - lastCheck) < kNetworkCheckIntervalMs)
     {
         return;
     }
-    lastCheck = millis();
+    lastCheck = now;
 
     if (isEthActive())
     {
@@ -198,27 +203,48 @@ void WiFiManager::loop()
     {
         if (_isApMode)
         {
+            LogSerial.printf("[Network] STA restored, IP: %s; stopping AP mode\n",
+                             WiFi.localIP().toString().c_str());
             dnsServer.stop();
             WiFi.softAPdisconnect(true);
             WiFi.mode(WIFI_STA);
             _isApMode = false;
         }
+        _lastReconnectAttemptMs = 0;
         return;
     }
 
     if (!_isApMode)
     {
-        LogSerial.println(F("[Network] Lost STA connection, switching to AP"));
+        LogSerial.println(F("[Network] STA disconnected; starting recovery AP and persistent reconnect"));
         startApMode();
         _isApMode = true;
+        _lastReconnectAttemptMs = 0;
     }
-    else if (connectToWifi())
+
+    if (_lastReconnectAttemptMs != 0 &&
+        static_cast<unsigned long>(now - _lastReconnectAttemptMs) < kReconnectIntervalMs)
     {
-        LogSerial.println(F("[Network] Reconnected to STA"));
+        return;
+    }
+
+    _lastReconnectAttemptMs = now;
+    LogSerial.println(F("[Network] Reconnect attempt: trying saved WiFi networks"));
+
+    if (connectToWifi())
+    {
+        LogSerial.printf("[Network] Reconnected to STA, IP: %s\n",
+                         WiFi.localIP().toString().c_str());
         dnsServer.stop();
         WiFi.softAPdisconnect(true);
         WiFi.mode(WIFI_STA);
         _isApMode = false;
+        _lastReconnectAttemptMs = 0;
+        refreshMdns();
+    }
+    else
+    {
+        LogSerial.println(F("[Network] Reconnect failed; AP stays active, will retry"));
     }
 }
 
@@ -245,6 +271,7 @@ void WiFiManager::reconfigure()
     WiFi.softAPdisconnect(true);
     WiFi.disconnect(true, true);
     _isApMode = false;
+    _lastReconnectAttemptMs = 0;
     delay(50);
 
     applySavedNetworkConfig();
@@ -413,6 +440,7 @@ bool WiFiManager::connectToWifi()
     }
 
     WiFi.persistent(false);
+    WiFi.setAutoReconnect(true);
     WiFi.mode(_isApMode ? WIFI_AP_STA : WIFI_STA);
     WiFi.setHostname(networkHostName());
     WiFi.setSleep(false);
