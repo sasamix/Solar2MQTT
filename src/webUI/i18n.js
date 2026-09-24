@@ -245,7 +245,14 @@
       "Live log output via the `/webserialws` WebSocket endpoint.": "Вывод журнала в реальном времени через WebSocket `/webserialws`.",
       "Send Command": "Отправить команду",
       "Apply": "Применить",
-      "Switch language": "Переключить язык"
+"Placeholder": "Сообщение",
+      "Use": "Укажите",
+      "to disable. Multiple DS18B20 sensors can share the same pin.": "для отключения. Несколько датчиков DS18B20 могут использовать один GPIO.",
+      "means immediate publish mode. Values greater than": "означает режим немедленной публикации. Значения больше",
+      "limit state publishes to the configured interval.": "ограничивают публикацию состояния указанным интервалом.",
+      "Select a firmware file (*.ota) and start the update. The device will reboot automatically after a successful upload.": "Выберите файл прошивки (*.ota) и запустите обновление. После успешной загрузки устройство автоматически перезагрузится.",
+      "Download all settings as JSON or restore from a previously saved file. On restore the current settings are overwritten and the device may reboot if required.": "Скачайте все настройки в JSON или восстановите их из ранее сохранённого файла. При восстановлении текущие настройки будут перезаписаны; при необходимости устройство перезагрузится.",
+            "Switch language": "Переключить язык"
     }
   };
 
@@ -280,11 +287,12 @@
     const text = String(source);
     if (lang === "en") return text;
 
-    const direct = resources.ru[text];
+    const normalized = text.replace(/\s+/g, " ").trim();
+    const direct = resources.ru[text] !== undefined ? resources.ru[text] : resources.ru[normalized];
     if (direct !== undefined) return direct;
 
     for (const [rule, render] of dynamicRules) {
-      const match = text.match(rule);
+      const match = normalized.match(rule);
       if (match) return render(match);
     }
     return text;
