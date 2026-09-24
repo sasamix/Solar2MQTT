@@ -1,5 +1,49 @@
 // #define isDEBUG
 #include "modbus.h"
+
+#include <cerrno>
+#include <cmath>
+#include <cstdlib>
+
+namespace
+{
+bool parseStrictLong(const String &text, long &value)
+{
+    String normalized = text;
+    normalized.trim();
+    if (normalized.isEmpty())
+        return false;
+
+    errno = 0;
+    char *end = nullptr;
+    const char *start = normalized.c_str();
+    const long parsed = strtol(start, &end, 10);
+    if (errno == ERANGE || end == start || end == nullptr || *end != '\0')
+        return false;
+
+    value = parsed;
+    return true;
+}
+
+bool parseStrictFloat(const String &text, float &value)
+{
+    String normalized = text;
+    normalized.trim();
+    if (normalized.isEmpty())
+        return false;
+
+    errno = 0;
+    char *end = nullptr;
+    const char *start = normalized.c_str();
+    const float parsed = strtof(start, &end);
+    if (errno == ERANGE || end == start || end == nullptr || *end != '\0' || !std::isfinite(parsed))
+        return false;
+
+    value = parsed;
+    return true;
+}
+} // namespace
+
  
 //----------------------------------------------------------------------
 //  Public Functions
