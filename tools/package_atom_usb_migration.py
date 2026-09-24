@@ -22,7 +22,7 @@ for name, src in required.items():
         raise SystemExit(f"Missing required migration file: {src}")
     shutil.copy2(src, OUT / name)
 
-readme = r"""Solar2MQTT ATOM Lite USB migration 0.0.0-dev-2.0.15
+readme = r"""Solar2MQTT ATOM Lite USB migration 0.0.0-dev-2.0.16
 ==============================================================
 
 Purpose
@@ -123,6 +123,6 @@ print(f"USB migration package created: {OUT}")
 for path in sorted(OUT.iterdir()):
     print(f"  {path.name}: {path.stat().st_size} bytes")
 
-zip_base = ROOT / ".firmware" / "Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.15"
+zip_base = ROOT / ".firmware" / "Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.16"
 archive = shutil.make_archive(str(zip_base), "zip", root_dir=OUT)
 print(f"USB migration ZIP: {archive}")
