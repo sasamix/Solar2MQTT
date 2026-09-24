@@ -55,6 +55,10 @@ private:
 
     void configureClient();
     bool ensureConnected();
+    void loadEnergyTotals();
+    void updateEnergyTotals();
+    void persistEnergyTotals(bool force = false);
+    void appendEnergyTotals(JsonDocument &snapshot);
     uint32_t statePublishIntervalMs() const;
     bool usesImmediateStatePublishing() const;
     void publishAlive();
