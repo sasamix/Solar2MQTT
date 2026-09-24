@@ -461,31 +461,35 @@ String MODBUS::requestData(String command)
         if (_powmrDumpRunning)
             return "ERROR: wait for PowMr diagnostic scan to finish";
 
-        uint16_t blockA[18] = {};
-        uint16_t blockB[9] = {};
+        // Track the complete primary live/diagnostic window plus the BMS/status
+        // tail. 4506-4509 contain battery voltage, SOC and charge/discharge
+        // current, so including them lets us correlate unknown registers with
+        // actual battery state changes.
+        uint16_t blockA[34] = {};
+        uint16_t blockB[12] = {};
         _mCom.clearReadCache();
-        const bool okA = _mCom.readHoldingBlock(4517, 18, blockA, 18);
+        const bool okA = _mCom.readHoldingBlock(4501, 34, blockA, 34);
         _mCom.clearReadCache();
-        const bool okB = _mCom.readHoldingBlock(4556, 9, blockB, 9);
+        const bool okB = _mCom.readHoldingBlock(4553, 12, blockB, 12);
         if (!okA || !okB)
             return "ERROR: unable to read one of the watch ranges";
 
         uint16_t current[kPowMrWatchCount] = {};
-        for (uint8_t i = 0; i < 18; ++i)
+        for (uint8_t i = 0; i < 34; ++i)
             current[i] = blockA[i];
-        for (uint8_t i = 0; i < 9; ++i)
-            current[18 + i] = blockB[i];
+        for (uint8_t i = 0; i < 12; ++i)
+            current[34 + i] = blockB[i];
 
         auto regForIndex = [](uint8_t i) -> uint16_t {
-            return i < 18 ? static_cast<uint16_t>(4517 + i)
-                          : static_cast<uint16_t>(4556 + (i - 18));
+            return i < 34 ? static_cast<uint16_t>(4501 + i)
+                          : static_cast<uint16_t>(4553 + (i - 34));
         };
         auto swap16 = [](uint16_t value) -> uint16_t {
             return static_cast<uint16_t>((value >> 8) | (value << 8));
         };
 
         String answer;
-        answer.reserve(3000);
+        answer.reserve(5000);
         const uint32_t nowSec = millis() / 1000UL;
 
         if (!_powmrWatchValid)
