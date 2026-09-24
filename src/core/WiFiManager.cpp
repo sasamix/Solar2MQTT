@@ -22,6 +22,7 @@ DNSServer dnsServer;
 IPAddress apIp(192, 168, 4, 1);
 
 constexpr unsigned long kNetworkCheckIntervalMs = 2000UL;
+constexpr unsigned long kStaReconnectGraceMs = 12000UL;
 constexpr unsigned long kReconnectFastIntervalMs = 15000UL;
 constexpr unsigned long kReconnectSlowIntervalMs = 60000UL;
 constexpr uint8_t kReconnectFastAttempts = 20;
@@ -217,14 +218,30 @@ void WiFiManager::loop()
             _isApMode = false;
         }
         _lastReconnectAttemptMs = 0;
+        _disconnectedSinceMs = 0;
         _reconnectFailures = 0;
-        maybeRoamToBetterAp();
+        // Do not actively roam a healthy mesh connection. Deco and the ESP32
+        // station stack handle association; forced scans/BSSID switches make
+        // brief RF dips look like full disconnects.
         return;
     }
 
     if (!_isApMode)
     {
-        LogSerial.println(F("[Network] STA disconnected; starting recovery AP and persistent reconnect"));
+        if (_disconnectedSinceMs == 0)
+        {
+            _disconnectedSinceMs = now;
+            LogSerial.println(F("[Network] STA link lost; waiting for native mesh auto-reconnect"));
+            WiFi.setAutoReconnect(true);
+            return;
+        }
+
+        if (static_cast<unsigned long>(now - _disconnectedSinceMs) < kStaReconnectGraceMs)
+        {
+            return;
+        }
+
+        LogSerial.println(F("[Network] STA did not recover within 12 s; starting recovery AP"));
         startApMode();
         _isApMode = true;
         _lastReconnectAttemptMs = 0;
@@ -249,10 +266,11 @@ void WiFiManager::loop()
         LogSerial.printf("[Network] Reconnected to STA, IP: %s\n",
                          WiFi.localIP().toString().c_str());
         dnsServer.stop();
-        WiFi.softAPdisconnect(true);
+        WiFi.softAPdisconnect(false);
         WiFi.mode(WIFI_STA);
         _isApMode = false;
         _lastReconnectAttemptMs = 0;
+        _disconnectedSinceMs = 0;
         _reconnectFailures = 0;
         refreshMdns();
     }
@@ -293,6 +311,7 @@ void WiFiManager::reconfigure()
     _isApMode = false;
     _lastReconnectAttemptMs = 0;
     _lastRoamCheckMs = 0;
+    _disconnectedSinceMs = 0;
     _reconnectFailures = 0;
     delay(50);
 
