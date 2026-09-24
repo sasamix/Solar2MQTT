@@ -47,7 +47,7 @@ jobs:
         run: |
           TAG="${{ github.event_name == 'release' && github.event.release.tag_name || 'v0.0.0-dev-2.0.14Y' }}"
           # Create the versioned release on first publication.
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --prerelease --title "Solar2MQTT 0.0.0-dev-2.0.14Y USB migration" --target "${{ github.sha }}" --notes "ONE-TIME USB MIGRATION BUILD. Flash the USB migration ZIP without erase_flash to preserve NVS. Includes LittleFS MQTT backlog, Wi-Fi failover and read-only PowMr diagnostics. Do not use normal OTA until the new partition layout is installed."
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --prerelease --title "Solar2MQTT 0.0.0-dev-2.0.14Y USB migration" --target "${{ github.sha }}" --notes "ONE-TIME USB MIGRATION BUILD. Flash the USB migration ZIP without erase_flash to preserve NVS. Includes LittleFS MQTT backlog, Wi-Fi failover, faster live Modbus display updates and read-only PowMr diagnostics. Do not use normal OTA until the new partition layout is installed."
           # Delete by asset name first. This avoids gh --clobber using a stale asset ID.
           gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Y.bin.ota" -y 2>/dev/null || true
           gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.14Y.bin" -y 2>/dev/null || true
