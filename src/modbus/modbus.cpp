@@ -659,8 +659,8 @@ String MODBUS::requestData(String command)
         String displayValue;
 
         auto parseIntRange = [&](int minValue, int maxValue, uint16_t targetReg, const char *unit) -> bool {
-            const int value = valueText.toInt();
-            if (value < minValue || value > maxValue)
+            long value = 0;
+            if (!parseStrictLong(valueText, value) || value < minValue || value > maxValue)
                 return false;
             reg = targetReg;
             raw = static_cast<uint16_t>(value);
@@ -674,8 +674,8 @@ String MODBUS::requestData(String command)
         };
 
         auto parseVoltage = [&](float minValue, float maxValue, uint16_t targetReg) -> bool {
-            const float value = valueText.toFloat();
-            if (value < minValue || value > maxValue)
+            float value = 0.0f;
+            if (!parseStrictFloat(valueText, value) || value < minValue || value > maxValue)
                 return false;
             reg = targetReg;
             raw = static_cast<uint16_t>(lroundf(value * 10.0f));
@@ -704,8 +704,8 @@ String MODBUS::requestData(String command)
         }
         else if (name == "outputfreq")
         {
-            const int hz = valueText.toInt();
-            if (hz == 50 || hz == 60)
+            long hz = 0;
+            if (parseStrictLong(valueText, hz) && (hz == 50 || hz == 60))
             {
                 reg = 5021;
                 raw = hz == 50 ? 0 : 1;
@@ -717,8 +717,8 @@ String MODBUS::requestData(String command)
             valid = parseIntRange(0, 120, 5022, "A");
         else if (name == "outputvoltage")
         {
-            const int volts = valueText.toInt();
-            if (volts == 220 || volts == 230 || volts == 240)
+            long volts = 0;
+            if (parseStrictLong(valueText, volts) && (volts == 220 || volts == 230 || volts == 240))
             {
                 reg = 5023;
                 raw = static_cast<uint16_t>(volts);
@@ -780,7 +780,11 @@ String MODBUS::requestData(String command)
         command.startsWith("powmr charge "))
     {
         const String valueText = command.substring(13);
-        const int amps = valueText.toInt();
+        long amps = 0;
+        if (!parseStrictLong(valueText, amps))
+        {
+            return "ERROR: charge current must be an integer";
+        }
         const bool allowed = amps == 10 || amps == 20 || amps == 30 ||
                              amps == 40 || amps == 50 || amps == 60;
         if (!allowed)
@@ -817,8 +821,11 @@ String MODBUS::requestData(String command)
         const int split = args.indexOf(' ');
         if (split <= 0)
             return "ERROR: syntax powmr read <start> <count>";
-        const int start = args.substring(0, split).toInt();
-        const int count = args.substring(split + 1).toInt();
+        long start = 0;
+        long count = 0;
+        if (!parseStrictLong(args.substring(0, split), start) ||
+            !parseStrictLong(args.substring(split + 1), count))
+            return "ERROR: powmr read start/count must be integers";
         if (start < 4500 || start > 5099 || count < 1 || count > 20 ||
             start + count - 1 > 5099)
             return "ERROR: diagnostic range must stay within 4500..5099, max 20 registers";
