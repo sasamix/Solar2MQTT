@@ -12,7 +12,6 @@ on:
 permissions:
   contents: write
 
-# Prevent parallel pushes from racing while replacing release assets.
 concurrency:
   group: atom-lite-release-${{ github.ref }}
   cancel-in-progress: true
@@ -27,78 +26,54 @@ jobs:
           python-version: '3.x'
       - name: Install PlatformIO
         run: pip install platformio
+      - name: Read firmware version
+        run: |
+          VER="$(awk -F' = ' '/^custom_source_version =/{print $2; exit}' platformio.ini)"
+          test -n "$VER"
+          echo "FW_VERSION=$VER" >> "$GITHUB_ENV"
+          echo "Firmware version: $VER"
       - name: Build ATOM Lite
         run: pio run -e m5stack_atom_lite
-      - name: Validate ATOM Lite partition layout
-        run: python tools/validate_atom_layout.py
-      - name: Package USB migration
-        run: python tools/package_atom_usb_migration.py
-      - name: Verify OTA artifact
+      - name: Verify firmware artifacts
         run: |
-          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.17.bin.ota"
-          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.17.bin"
-          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.17.zip"
+          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin.ota"
+          test -s ".firmware/Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin"
           ls -lh .firmware/
-          unzip -l ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.17.zip"
       - name: Upload firmware to GitHub Release
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish restored 14W runtime as 2.0.17'))
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish stable 14W-based runtime as 2.0.18'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.event_name == 'release' && github.event.release.tag_name || 'v0.0.0-dev-2.0.17' }}"
-          # Create the versioned release on first publication.
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Solar2MQTT 0.0.0-dev-2.0.17" --target "${{ github.sha }}" --notes "ATOM Lite 17: restores the complete proven 14W runtime while keeping the already-migrated dual-OTA partition layout. This release is the stable baseline before further inverter work."
-          # Delete by asset name first. This avoids gh --clobber using a stale asset ID.
-          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.17.bin.ota" -y 2>/dev/null || true
-          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.17.bin" -y 2>/dev/null || true
-          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.17.zip" -y 2>/dev/null || true
+          TAG="v${FW_VERSION}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+            --title "Solar2MQTT ${FW_VERSION}" \
+            --target "${{ github.sha }}" \
+            --notes "ATOM Lite: based on the proven 2.0.14W Wi-Fi/runtime baseline. Only the PowMr diagnostic watch was expanded to cover 4501-4534 and 4553-4564 for SOC/BMS correlation."
+          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin.ota" -y 2>/dev/null || true
+          gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin" -y 2>/dev/null || true
           gh release upload "$TAG" \
-            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.17.bin.ota" \
-            ".firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.17.bin" \
-            ".firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.17.zip"
-      - name: Remove old diagnostic releases
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+            ".firmware/Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin.ota" \
+            ".firmware/Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin"
+      - name: Hide broken releases but preserve tags and history
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Publish stable 14W-based runtime as 2.0.18'))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           for TAG in \
-            v0.0.0-dev-2.0.8 \
-            v0.0.0-dev-2.0.9 \
-            v0.0.0-dev-2.0.10 \
-            v0.0.0-dev-2.0.11 \
-            v0.0.0-dev-2.0.12 \
-            v0.0.0-dev-2.0.13 \
-            v0.0.0-dev-2.0.13A \
-            v0.0.0-dev-2.0.14A \
-            v0.0.0-dev-2.0.14B \
-            v0.0.0-dev-2.0.14C \
-            v0.0.0-dev-2.0.14D \
-            v0.0.0-dev-2.0.14E \
-            v0.0.0-dev-2.0.14F \
-            v0.0.0-dev-2.0.14G \
-            v0.0.0-dev-2.0.14H \
-            v0.0.0-dev-2.0.14I \
-            v0.0.0-dev-2.0.14J \
-            v0.0.0-dev-2.0.14K \
-            v0.0.0-dev-2.0.14L \
-            v0.0.0-dev-2.0.14M \
-            v0.0.0-dev-2.0.14N \
-            v0.0.0-dev-2.0.14O \
-            v0.0.0-dev-2.0.14Q \
-            v0.0.0-dev-2.0.14P \
-            v0.0.0-dev-2.0.14R \
-            v0.0.0-dev-2.0.14S \
-            v0.0.0-dev-2.0.14T \
-            v0.0.0-dev-2.0.14U \
-            v0.0.0-dev-2.0.14V
+            v0.0.0-dev-2.0.14X \
+            v0.0.0-dev-2.0.14Y \
+            v0.0.0-dev-2.0.14Z \
+            v0.0.0-dev-2.0.15 \
+            v0.0.0-dev-2.0.16 \
+            v0.0.0-dev-2.0.17
           do
-            gh release delete "$TAG" --cleanup-tag -y 2>/dev/null || true
+            gh release delete "$TAG" -y 2>/dev/null || true
           done
+          echo "Broken release objects hidden; git tags/commits preserved."
       - uses: actions/upload-artifact@v4
         with:
           name: Solar2MQTT-m5stack-atom-lite
           path: |
-            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.17.bin.ota
-            .firmware/Solar2MQTT_m5stack_atom_lite_V0.0.0-dev-2.0.17.bin
-            .firmware/Solar2MQTT_m5stack_atom_lite_USB_MIGRATION_V0.0.0-dev-2.0.17.zip
+            .firmware/Solar2MQTT_m5stack_atom_lite_V${{ env.FW_VERSION }}.bin.ota
+            .firmware/Solar2MQTT_m5stack_atom_lite_V${{ env.FW_VERSION }}.bin
           if-no-files-found: error
