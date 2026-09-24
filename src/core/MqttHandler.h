@@ -59,6 +59,16 @@ private:
     void updateEnergyTotals();
     void persistEnergyTotals(bool force = false);
     void appendEnergyTotals(JsonDocument &snapshot);
+    void loadBacklogState();
+    void saveBacklogState();
+    void captureBacklogIfNeeded(bool force = false);
+    void flushBacklog();
+    void acknowledgeBacklog(uint32_t seq);
+    bool readBacklogRecord(uint8_t slot, TelemetryRecord &record);
+    bool writeBacklogRecord(uint8_t slot, const TelemetryRecord &record);
+    void deleteBacklogRecord(uint8_t slot);
+    String backlogTopic() const;
+    void requestTimeSyncIfNeeded();
     uint32_t statePublishIntervalMs() const;
     bool usesImmediateStatePublishing() const;
     void publishAlive();
