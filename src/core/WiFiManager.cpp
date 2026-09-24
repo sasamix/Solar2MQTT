@@ -23,6 +23,9 @@ IPAddress apIp(192, 168, 4, 1);
 
 constexpr unsigned long kNetworkCheckIntervalMs = 2000UL;
 constexpr unsigned long kReconnectIntervalMs = 15000UL;
+constexpr unsigned long kRoamCheckIntervalMs = 300000UL;
+constexpr int kRoamPoorRssiDbm = -72;
+constexpr int kRoamImprovementDb = 10;
 
 #if HAS_LAN
 bool s_ethConnected = false;
@@ -211,6 +214,7 @@ void WiFiManager::loop()
             _isApMode = false;
         }
         _lastReconnectAttemptMs = 0;
+        maybeRoamToBetterAp();
         return;
     }
 
@@ -272,6 +276,7 @@ void WiFiManager::reconfigure()
     WiFi.disconnect(true, true);
     _isApMode = false;
     _lastReconnectAttemptMs = 0;
+    _lastRoamCheckMs = 0;
     delay(50);
 
     applySavedNetworkConfig();
@@ -451,12 +456,16 @@ bool WiFiManager::connectToWifi()
         const char *ssid;
         const char *password;
         const char *bssid;
+        bool primary;
     };
 
     const Candidate candidates[] = {
-        {_settings.get.wifiSsid0(), _settings.get.wifiPassword0(), _settings.get.wifiBssid0()},
-        {_settings.get.wifiSsid1(), _settings.get.wifiPassword1(), _settings.get.wifiBssid1()},
+        {_settings.get.wifiSsid0(), _settings.get.wifiPassword0(), _settings.get.wifiBssid0(), true},
+        {_settings.get.wifiSsid1(), _settings.get.wifiPassword1(), _settings.get.wifiBssid1(), false},
     };
+
+    const int networkCount = WiFi.scanNetworks(false, true);
+    LogSerial.printf("[Network] WiFi scan found %d APs\n", networkCount);
 
     for (const Candidate &candidate : candidates)
     {
@@ -481,40 +490,169 @@ bool WiFiManager::connectToWifi()
             WiFi.config(ip, gw, sn, dns);
         }
 
-        uint8_t bssid[6] = {};
-        const bool bssidLockRequested = _settings.get.wifiBssidLock();
-        const bool lockBssid = bssidLockRequested && parseBssid(candidate.bssid, bssid);
+        uint8_t lockedBssid[6] = {};
+        const bool lockRequested = candidate.primary && _settings.get.wifiBssidLock();
+        const bool lockValid = lockRequested && parseBssid(candidate.bssid, lockedBssid);
 
-        LogSerial.printf("[Network] Trying SSID: %s\n", candidate.ssid);
-        if (bssidLockRequested && !lockBssid)
+        int bestIndex = -1;
+        int bestRssi = -127;
+
+        if (networkCount > 0)
         {
-            LogSerial.println(F("[Network] BSSID lock requested, but stored BSSID is missing/invalid. Falling back to strongest AP for the SSID."));
+            for (int i = 0; i < networkCount; ++i)
+            {
+                if (WiFi.SSID(i) != candidate.ssid)
+                    continue;
+
+                const uint8_t *scanBssid = WiFi.BSSID(i);
+                if (lockRequested)
+                {
+                    if (!lockValid || scanBssid == nullptr || memcmp(scanBssid, lockedBssid, 6) != 0)
+                        continue;
+                }
+
+                const int rssi = WiFi.RSSI(i);
+                if (rssi > bestRssi)
+                {
+                    bestRssi = rssi;
+                    bestIndex = i;
+                }
+            }
         }
 
-        if (lockBssid)
+        if (lockRequested && !lockValid)
         {
-            WiFi.setScanMethod(WIFI_FAST_SCAN);
-            WiFi.begin(candidate.ssid, candidate.password, 0, bssid, true);
+            LogSerial.println(F("[Network] Primary BSSID lock is enabled but stored BSSID is invalid"));
         }
-        else
+
+        if (bestIndex < 0)
         {
-            WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
-            WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-            WiFi.begin(candidate.ssid, candidate.password);
+            LogSerial.printf("[Network] SSID not found in scan: %s%s\n",
+                             candidate.ssid,
+                             candidate.primary ? " (primary)" : " (fallback)");
+            continue;
         }
+
+        const uint8_t *bestBssid = WiFi.BSSID(bestIndex);
+        const int32_t channel = WiFi.channel(bestIndex);
+        String bestBssidText = WiFi.BSSIDstr(bestIndex);
+
+        LogSerial.printf("[Network] Trying %s SSID: %s BSSID=%s RSSI=%d dBm channel=%ld\n",
+                         candidate.primary ? "primary" : "fallback",
+                         candidate.ssid,
+                         bestBssidText.c_str(),
+                         bestRssi,
+                         static_cast<long>(channel));
+
+        WiFi.begin(candidate.ssid,
+                   candidate.password,
+                   channel > 0 ? channel : 0,
+                   bestBssid,
+                   true);
 
         for (int attempt = 0; attempt < 12; ++attempt)
         {
             if (WiFi.status() == WL_CONNECTED)
             {
-                LogSerial.printf("[Network] WiFi connected, IP: %s\n", WiFi.localIP().toString().c_str());
+                LogSerial.printf("[Network] WiFi connected via %s, BSSID=%s RSSI=%d dBm IP=%s\n",
+                                 candidate.primary ? "primary" : "fallback",
+                                 WiFi.BSSIDstr().c_str(),
+                                 WiFi.RSSI(),
+                                 WiFi.localIP().toString().c_str());
+                WiFi.scanDelete();
                 return true;
             }
             delay(500);
         }
+
+        LogSerial.printf("[Network] %s SSID connection failed: %s\n",
+                         candidate.primary ? "Primary" : "Fallback",
+                         candidate.ssid);
     }
 
+    WiFi.scanDelete();
     return false;
+}
+
+bool WiFiManager::maybeRoamToBetterAp()
+{
+    if (WiFi.status() != WL_CONNECTED || _settings.get.wifiBssidLock())
+    {
+        return false;
+    }
+
+    const unsigned long now = millis();
+    if (_lastRoamCheckMs != 0 &&
+        static_cast<unsigned long>(now - _lastRoamCheckMs) < kRoamCheckIntervalMs)
+    {
+        return false;
+    }
+    _lastRoamCheckMs = now;
+
+    const int currentRssi = WiFi.RSSI();
+    if (currentRssi > kRoamPoorRssiDbm)
+    {
+        return false;
+    }
+
+    const String currentSsid = WiFi.SSID();
+    const String currentBssid = WiFi.BSSIDstr();
+
+    const int networkCount = WiFi.scanNetworks(false, true);
+    if (networkCount <= 0)
+    {
+        WiFi.scanDelete();
+        return false;
+    }
+
+    int bestIndex = -1;
+    int bestRssi = currentRssi;
+    for (int i = 0; i < networkCount; ++i)
+    {
+        if (WiFi.SSID(i) != currentSsid)
+            continue;
+        if (WiFi.RSSI(i) > bestRssi)
+        {
+            bestRssi = WiFi.RSSI(i);
+            bestIndex = i;
+        }
+    }
+
+    if (bestIndex < 0 || (bestRssi - currentRssi) < kRoamImprovementDb)
+    {
+        WiFi.scanDelete();
+        return false;
+    }
+
+    const uint8_t *bestBssid = WiFi.BSSID(bestIndex);
+    const int32_t channel = WiFi.channel(bestIndex);
+    const String bestBssidText = WiFi.BSSIDstr(bestIndex);
+
+    const char *password = nullptr;
+    if (currentSsid == _settings.get.wifiSsid0())
+        password = _settings.get.wifiPassword0();
+    else if (currentSsid == _settings.get.wifiSsid1())
+        password = _settings.get.wifiPassword1();
+
+    if (password == nullptr)
+    {
+        WiFi.scanDelete();
+        return false;
+    }
+
+    LogSerial.printf("[Network] Roaming %s -> %s, RSSI %d -> %d dBm\n",
+                     currentBssid.c_str(),
+                     bestBssidText.c_str(),
+                     currentRssi,
+                     bestRssi);
+
+    WiFi.begin(currentSsid.c_str(),
+               password,
+               channel > 0 ? channel : 0,
+               bestBssid,
+               true);
+    WiFi.scanDelete();
+    return true;
 }
 
 bool WiFiManager::applySavedNetworkConfig()
