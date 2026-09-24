@@ -27,8 +27,6 @@ static const HaEntityDescriptor HA_STATIC_DESCRIPTORS[] = {
     {DESCR_Battery_Rating_Voltage, "car-battery", "V", "voltage"},
     {DESCR_Battery_Recharge_Voltage, "battery-charging-high", "V", "voltage"},
     {DESCR_Battery_Redischarge_Voltage, "battery-charging-outline", "V", "voltage"},
-    {DESCR_Battery_Back_To_Utility_SOC, "transmission-tower-import", "%", ""},
-    {DESCR_Battery_Back_To_Battery_SOC, "battery-charging-high", "%", ""},
     {DESCR_Battery_Type, "car-battery", "", ""},
     {DESCR_Battery_Under_Voltage, "battery-remove-outline", "V", "voltage"},
     {DESCR_Buzzer_Enabled, "tune-variant", "", ""},
@@ -182,3 +180,4 @@ static const HaEntityDescriptor HA_LIVE_DESCRIPTORS[] = {
     {DESCR_Transformer_Temperature, "thermometer-lines", HA_UNIT_CELSIUS, "temperature"},
     {DESCR_Warning_Code, "alert-outline", "", ""},
 };
+
