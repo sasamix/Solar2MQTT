@@ -453,6 +453,61 @@ String MODBUS::requestData(String command)
         return answer;
     }
 
+    // Read-only probe for the settings immediately after the known
+    // 5033/menu-35 register. Newer PowMr firmware families place menu 36+
+    // (equalization-now, BMS switch and SOC thresholds) in this area.
+    // Do not write these addresses until a device-specific map is confirmed.
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command == "powmr socmap")
+    {
+        if (_powmrDumpRunning)
+            return "ERROR: wait for PowMr diagnostic scan to finish";
+
+        const char *const labels[] = {
+            "candidate menu36 Equalization now",
+            "candidate menu37 BMS function",
+            "candidate menu38 SOC under lock",
+            "candidate menu39 SOC turn to AC",
+            "candidate menu40 SOC turn to DC",
+            "candidate menu41 Restart SOC",
+            "candidate menu42",
+            "candidate menu43",
+            "candidate menu44",
+        };
+
+        auto swap16 = [](uint16_t value) -> uint16_t {
+            return static_cast<uint16_t>((value >> 8) | (value << 8));
+        };
+
+        String answer = "POWMR_SOCMAP READ-ONLY 5034..5042\n";
+        answer.reserve(1800);
+        for (uint8_t i = 0; i < 9; ++i)
+        {
+            const uint16_t reg = static_cast<uint16_t>(5034 + i);
+            uint16_t value = 0;
+            _mCom.clearReadCache();
+            const bool ok = _mCom.readHoldingBlock(reg, 1, &value, 1);
+
+            answer += String(reg);
+            answer += " ";
+            answer += labels[i];
+            answer += " ";
+            if (!ok)
+            {
+                answer += "NO_RESPONSE\n";
+                continue;
+            }
+
+            answer += "raw=";
+            answer += static_cast<unsigned int>(value);
+            answer += " swap=";
+            answer += static_cast<unsigned int>(swap16(value));
+            answer += "\n";
+        }
+        answer += "NOTE: candidates only; writes remain disabled until verified.";
+        return answer;
+    }
+
     // Correlation helper for unknown PowMr registers.
     // First call stores a baseline; later calls show only changed registers.
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
