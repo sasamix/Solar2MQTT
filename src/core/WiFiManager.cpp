@@ -24,6 +24,7 @@ IPAddress apIp(192, 168, 4, 1);
 constexpr unsigned long kNetworkCheckIntervalMs = 2000UL;
 constexpr unsigned long kReconnectIntervalMs = 15000UL;
 constexpr unsigned long kRoamCheckIntervalMs = 300000UL;
+constexpr unsigned long kPrimaryRecoveryCheckIntervalMs = 60000UL;
 constexpr int kRoamPoorRssiDbm = -72;
 constexpr int kRoamImprovementDb = 10;
 
@@ -576,27 +577,41 @@ bool WiFiManager::connectToWifi()
 
 bool WiFiManager::maybeRoamToBetterAp()
 {
-    if (WiFi.status() != WL_CONNECTED || _settings.get.wifiBssidLock())
+    if (WiFi.status() != WL_CONNECTED)
     {
         return false;
     }
 
     const unsigned long now = millis();
+    const String currentSsid = WiFi.SSID();
+    const String primarySsid = _settings.get.wifiSsid0();
+    const bool onPrimary = primarySsid.length() > 0 && currentSsid == primarySsid;
+
+    const unsigned long checkInterval =
+        onPrimary ? kRoamCheckIntervalMs : kPrimaryRecoveryCheckIntervalMs;
+
     if (_lastRoamCheckMs != 0 &&
-        static_cast<unsigned long>(now - _lastRoamCheckMs) < kRoamCheckIntervalMs)
+        static_cast<unsigned long>(now - _lastRoamCheckMs) < checkInterval)
     {
         return false;
     }
     _lastRoamCheckMs = now;
 
-    const int currentRssi = WiFi.RSSI();
-    if (currentRssi > kRoamPoorRssiDbm)
+    // A manual BSSID lock applies only to the primary network. While on the
+    // fallback network we still periodically look for the primary SSID.
+    if (onPrimary && _settings.get.wifiBssidLock())
     {
         return false;
     }
 
-    const String currentSsid = WiFi.SSID();
-    const String currentBssid = WiFi.BSSIDstr();
+    const int currentRssi = WiFi.RSSI();
+
+    // While connected to the preferred network, avoid scans unless signal is
+    // actually poor. This keeps mesh roaming lightweight.
+    if (onPrimary && currentRssi > kRoamPoorRssiDbm)
+    {
+        return false;
+    }
 
     const int networkCount = WiFi.scanNetworks(false, true);
     if (networkCount <= 0)
@@ -605,20 +620,47 @@ bool WiFiManager::maybeRoamToBetterAp()
         return false;
     }
 
+    String targetSsid = onPrimary ? currentSsid : primarySsid;
+    if (targetSsid.length() == 0)
+    {
+        WiFi.scanDelete();
+        return false;
+    }
+
     int bestIndex = -1;
-    int bestRssi = currentRssi;
+    int bestRssi = -127;
+
+    uint8_t lockedBssid[6] = {};
+    const bool lockRequested = !onPrimary && _settings.get.wifiBssidLock();
+    const bool lockValid = lockRequested && parseBssid(_settings.get.wifiBssid0(), lockedBssid);
+
     for (int i = 0; i < networkCount; ++i)
     {
-        if (WiFi.SSID(i) != currentSsid)
+        if (WiFi.SSID(i) != targetSsid)
             continue;
-        if (WiFi.RSSI(i) > bestRssi)
+
+        const uint8_t *scanBssid = WiFi.BSSID(i);
+        if (lockRequested)
         {
-            bestRssi = WiFi.RSSI(i);
+            if (!lockValid || scanBssid == nullptr || memcmp(scanBssid, lockedBssid, 6) != 0)
+                continue;
+        }
+
+        const int candidateRssi = WiFi.RSSI(i);
+        if (candidateRssi > bestRssi)
+        {
+            bestRssi = candidateRssi;
             bestIndex = i;
         }
     }
 
-    if (bestIndex < 0 || (bestRssi - currentRssi) < kRoamImprovementDb)
+    if (bestIndex < 0)
+    {
+        WiFi.scanDelete();
+        return false;
+    }
+
+    if (onPrimary && (bestRssi - currentRssi) < kRoamImprovementDb)
     {
         WiFi.scanDelete();
         return false;
@@ -627,11 +669,12 @@ bool WiFiManager::maybeRoamToBetterAp()
     const uint8_t *bestBssid = WiFi.BSSID(bestIndex);
     const int32_t channel = WiFi.channel(bestIndex);
     const String bestBssidText = WiFi.BSSIDstr(bestIndex);
+    const String currentBssid = WiFi.BSSIDstr();
 
     const char *password = nullptr;
-    if (currentSsid == _settings.get.wifiSsid0())
+    if (targetSsid == _settings.get.wifiSsid0())
         password = _settings.get.wifiPassword0();
-    else if (currentSsid == _settings.get.wifiSsid1())
+    else if (targetSsid == _settings.get.wifiSsid1())
         password = _settings.get.wifiPassword1();
 
     if (password == nullptr)
@@ -640,13 +683,24 @@ bool WiFiManager::maybeRoamToBetterAp()
         return false;
     }
 
-    LogSerial.printf("[Network] Roaming %s -> %s, RSSI %d -> %d dBm\n",
-                     currentBssid.c_str(),
-                     bestBssidText.c_str(),
-                     currentRssi,
-                     bestRssi);
+    if (!onPrimary)
+    {
+        LogSerial.printf("[Network] Preferred SSID restored: switching %s -> %s, BSSID=%s RSSI=%d dBm\n",
+                         currentSsid.c_str(),
+                         targetSsid.c_str(),
+                         bestBssidText.c_str(),
+                         bestRssi);
+    }
+    else
+    {
+        LogSerial.printf("[Network] Roaming %s -> %s, RSSI %d -> %d dBm\n",
+                         currentBssid.c_str(),
+                         bestBssidText.c_str(),
+                         currentRssi,
+                         bestRssi);
+    }
 
-    WiFi.begin(currentSsid.c_str(),
+    WiFi.begin(targetSsid.c_str(),
                password,
                channel > 0 ? channel : 0,
                bestBssid,
