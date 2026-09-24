@@ -27,8 +27,10 @@ private:
     bool _isApMode;
     bool _ethActive;
     unsigned long _lastReconnectAttemptMs = 0;
+    unsigned long _lastRoamCheckMs = 0;
 
     bool connectToWifi();
+    bool maybeRoamToBetterAp();
     void startApMode();
     bool initEthernet();
     bool applySavedNetworkConfig();
