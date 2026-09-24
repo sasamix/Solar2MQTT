@@ -462,9 +462,6 @@ bool WiFiManager::connectToWifi()
     }
 
     WiFi.persistent(false);
-    // Manual candidate selection and ESP32 auto-reconnect must not run at the
-    // same time. Otherwise a failed primary attempt can still be CONNECTING
-    // when WiFi.begin() tries to configure the fallback candidate.
     WiFi.setAutoReconnect(false);
     WiFi.mode(_isApMode ? WIFI_AP_STA : WIFI_STA);
     WiFi.setHostname(networkHostName());
@@ -485,9 +482,6 @@ bool WiFiManager::connectToWifi()
         {_settings.get.wifiSsid1(), _settings.get.wifiPassword1(), _settings.get.wifiBssid1(), false},
     };
 
-    const int networkCount = WiFi.scanNetworks(false, true);
-    LogSerial.printf("[Network] WiFi scan found %d APs\n", networkCount);
-
     for (const Candidate &candidate : candidates)
     {
         if (!candidate.ssid || !candidate.ssid[0])
@@ -495,10 +489,6 @@ bool WiFiManager::connectToWifi()
             continue;
         }
 
-        // A mesh network commonly exposes the same SSID on many APs. If the
-        // fallback slot contains the same SSID/password as the primary slot,
-        // it is not a real fallback and would only duplicate the connection
-        // attempt.
         if (!candidate.primary &&
             strcmp(candidate.ssid, _settings.get.wifiSsid0()) == 0 &&
             strcmp(candidate.password ? candidate.password : "",
@@ -524,78 +514,69 @@ bool WiFiManager::connectToWifi()
             WiFi.config(ip, gw, sn, dns);
         }
 
-        uint8_t lockedBssid[6] = {};
         const bool lockRequested = candidate.primary && _settings.get.wifiBssidLock();
-        const bool lockValid = lockRequested && parseBssid(candidate.bssid, lockedBssid);
-
-        int bestIndex = -1;
-        int bestRssi = -127;
-
-        if (networkCount > 0)
-        {
-            for (int i = 0; i < networkCount; ++i)
-            {
-                if (WiFi.SSID(i) != candidate.ssid)
-                    continue;
-
-                const uint8_t *scanBssid = WiFi.BSSID(i);
-                if (lockRequested)
-                {
-                    if (!lockValid || scanBssid == nullptr || memcmp(scanBssid, lockedBssid, 6) != 0)
-                        continue;
-                }
-
-                const int rssi = WiFi.RSSI(i);
-                if (rssi > bestRssi)
-                {
-                    bestRssi = rssi;
-                    bestIndex = i;
-                }
-            }
-        }
-
-        if (lockRequested && !lockValid)
-        {
-            LogSerial.println(F("[Network] Primary BSSID lock is enabled but stored BSSID is invalid"));
-        }
-
-        if (bestIndex < 0)
-        {
-            LogSerial.printf("[Network] SSID not found in scan: %s%s\n",
-                             candidate.ssid,
-                             candidate.primary ? " (primary)" : " (fallback)");
-            continue;
-        }
-
-        const uint8_t *bestBssid = WiFi.BSSID(bestIndex);
-        const int32_t channel = WiFi.channel(bestIndex);
-        String bestBssidText = WiFi.BSSIDstr(bestIndex);
-
-        LogSerial.printf("[Network] Trying %s SSID: %s BSSID=%s RSSI=%d dBm channel=%ld\n",
-                         candidate.primary ? "primary" : "fallback",
-                         candidate.ssid,
-                         bestBssidText.c_str(),
-                         bestRssi,
-                         static_cast<long>(channel));
 
         if (lockRequested)
         {
+            uint8_t lockedBssid[6] = {};
+            if (!parseBssid(candidate.bssid, lockedBssid))
+            {
+                LogSerial.println(F("[Network] Primary BSSID lock is enabled but stored BSSID is invalid"));
+                continue;
+            }
+
+            // Only a manual BSSID lock needs a scan. Normal mesh operation
+            // must connect directly by SSID so Deco/Orbi/etc. can select the
+            // appropriate AP without a blocking full-network scan.
+            const int networkCount = WiFi.scanNetworks(false, false);
+            int lockedIndex = -1;
+            if (networkCount > 0)
+            {
+                for (int i = 0; i < networkCount; ++i)
+                {
+                    const uint8_t *scanBssid = WiFi.BSSID(i);
+                    if (WiFi.SSID(i) == candidate.ssid &&
+                        scanBssid != nullptr &&
+                        memcmp(scanBssid, lockedBssid, 6) == 0)
+                    {
+                        lockedIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            if (lockedIndex < 0)
+            {
+                LogSerial.printf("[Network] Locked BSSID not found for SSID: %s\n", candidate.ssid);
+                WiFi.scanDelete();
+                continue;
+            }
+
+            const int32_t channel = WiFi.channel(lockedIndex);
+            const uint8_t *bestBssid = WiFi.BSSID(lockedIndex);
+            LogSerial.printf("[Network] Trying primary SSID with BSSID lock: %s BSSID=%s channel=%ld\n",
+                             candidate.ssid,
+                             WiFi.BSSIDstr(lockedIndex).c_str(),
+                             static_cast<long>(channel));
+
             WiFi.begin(candidate.ssid,
                        candidate.password,
                        channel > 0 ? channel : 0,
                        bestBssid,
                        true);
+            WiFi.scanDelete();
         }
         else
         {
-            // For mesh networks (Deco, Orbi, etc.) do not pin initial
-            // association to one AP/BSSID. Let the station choose among the
-            // APs advertising the SSID; our periodic roam logic can still
-            // move to a better AP later when signal becomes poor.
+            LogSerial.printf("[Network] Trying %s SSID: %s (automatic mesh AP selection)\n",
+                             candidate.primary ? "primary" : "fallback",
+                             candidate.ssid);
             WiFi.begin(candidate.ssid, candidate.password);
         }
 
-        for (int attempt = 0; attempt < 24; ++attempt)
+        // Direct SSID association normally completes quickly. Keep enough
+        // room for DHCP without making fallback/recovery feel stalled.
+        for (int attempt = 0; attempt < 20; ++attempt)
         {
             if (WiFi.status() == WL_CONNECTED)
             {
@@ -605,7 +586,6 @@ bool WiFiManager::connectToWifi()
                                  WiFi.RSSI(),
                                  WiFi.localIP().toString().c_str());
                 WiFi.setAutoReconnect(true);
-                WiFi.scanDelete();
                 return true;
             }
             delay(500);
@@ -615,13 +595,10 @@ bool WiFiManager::connectToWifi()
                          candidate.primary ? "Primary" : "Fallback",
                          candidate.ssid);
 
-        // Abort the timed-out attempt before configuring another candidate.
-        // This prevents ESP_ERR_WIFI_STATE ("STA is connecting").
         WiFi.disconnect(false, false);
         delay(250);
     }
 
-    WiFi.scanDelete();
     return false;
 }
 
