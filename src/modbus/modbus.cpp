@@ -453,10 +453,10 @@ String MODBUS::requestData(String command)
         return answer;
     }
 
-    // Read-only probe for the settings immediately after the known
-    // 5033/menu-35 register. Newer PowMr firmware families place menu 36+
-    // (equalization-now, BMS switch and SOC thresholds) in this area.
-    // Do not write these addresses until a device-specific map is confirmed.
+    // Read-only probe immediately after the known 5033 setting register.
+    // On the user's unit 5034 numerically mirrors the logical flags at 4553,
+    // so this region is treated as an unknown shadow/control block rather
+    // than as SOC thresholds. Never write these addresses without a verified map.
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
         command == "powmr socmap")
     {
@@ -464,22 +464,22 @@ String MODBUS::requestData(String command)
             return "ERROR: wait for PowMr diagnostic scan to finish";
 
         const char *const labels[] = {
-            "hypothesis menu38 SOC under lock",
-            "hypothesis menu39 SOC turn to AC",
-            "hypothesis menu40 SOC turn to DC",
-            "hypothesis menu41 Restart SOC",
-            "hypothesis menu42 BMS protocol",
-            "candidate menu43",
-            "candidate menu44",
-            "candidate menu45",
-            "candidate menu46",
+            "shadow/control candidate (matches flags4553 on this unit)",
+            "shadow/control candidate",
+            "shadow/control candidate",
+            "shadow/control candidate",
+            "shadow/control candidate",
+            "shadow/control candidate",
+            "shadow/control candidate",
+            "shadow/control candidate",
+            "shadow/control candidate",
         };
 
         auto swap16 = [](uint16_t value) -> uint16_t {
             return static_cast<uint16_t>((value >> 8) | (value << 8));
         };
 
-        String answer = "POWMR_SOCMAP READ-ONLY settingsFlags4535 + 5034..5042\n";
+        String answer = "POWMR_SOCMAP READ-ONLY unknown shadow/control 5034..5042\n";
         answer.reserve(1900);
 
         uint16_t flags4535 = 0;
@@ -520,7 +520,7 @@ String MODBUS::requestData(String command)
             answer += static_cast<unsigned int>(swap16(value));
             answer += "\n";
         }
-        answer += "NOTE: candidates only; writes remain disabled until verified.";
+        answer += "NOTE: 5034..5042 are not treated as SOC thresholds; writes remain disabled.";
         return answer;
     }
 
