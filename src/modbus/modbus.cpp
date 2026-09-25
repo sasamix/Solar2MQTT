@@ -461,28 +461,21 @@ String MODBUS::requestData(String command)
         if (_powmrDumpRunning)
             return "ERROR: wait for PowMr diagnostic scan to finish";
 
-        // Track the complete primary live/diagnostic window plus the BMS/status
-        // tail. 4506-4509 contain battery voltage, SOC and charge/discharge
-        // current, so including them lets us correlate unknown registers with
-        // actual battery state changes.
-        uint16_t blockA[34] = {};
-        uint16_t blockB[12] = {};
-        _mCom.clearReadCache();
-        const bool okA = _mCom.readHoldingBlock(4501, 34, blockA, 34);
-        _mCom.clearReadCache();
-        const bool okB = _mCom.readHoldingBlock(4553, 12, blockB, 12);
-        if (!okA || !okB)
-            return "ERROR: unable to read one of the watch ranges";
-
+        // Read all 64 registers from 4501 through 4564, including settings.
+        // Keep the existing live/status requests and add the missing settings
+        // block separately, without increasing the maximum request length.
         uint16_t current[kPowMrWatchCount] = {};
-        for (uint8_t i = 0; i < 34; ++i)
-            current[i] = blockA[i];
-        for (uint8_t i = 0; i < 12; ++i)
-            current[34 + i] = blockB[i];
+        _mCom.clearReadCache();
+        const bool okA = _mCom.readHoldingBlock(4501, 34, current, 34);
+        _mCom.clearReadCache();
+        const bool okSettings = _mCom.readHoldingBlock(4535, 18, current + 34, 18);
+        _mCom.clearReadCache();
+        const bool okB = _mCom.readHoldingBlock(4553, 12, current + 52, 12);
+        if (!okA || !okSettings || !okB)
+            return "ERROR: unable to read one of the watch ranges; baseline unchanged";
 
         auto regForIndex = [](uint8_t i) -> uint16_t {
-            return i < 34 ? static_cast<uint16_t>(4501 + i)
-                          : static_cast<uint16_t>(4553 + (i - 34));
+            return static_cast<uint16_t>(4501 + i);
         };
         auto swap16 = [](uint16_t value) -> uint16_t {
             return static_cast<uint16_t>((value >> 8) | (value << 8));
