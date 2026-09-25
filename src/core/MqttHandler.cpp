@@ -843,6 +843,11 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
         doc["state_topic"] = topicBase + "/DeviceData/" + key;
         doc["command_topic"] = commandTopic;
         doc["command_template"] = commandTemplate;
+        if (strcmp(key, DESCR_Output_Source_Priority) == 0)
+        {
+            // Keep MQTT state payloads stable for existing consumers.
+            doc["value_template"] = "{% set modes = {'Utility first': 'UTI — сначала сеть', 'Solar first': 'SUB — солнце → сеть → батарея', 'SBU priority': 'SBU — солнце → батарея → сеть'} %}{{ modes.get(value, value) }}";
+        }
         doc["availability_topic"] = availabilityTopic;
         doc["payload_available"] = "true";
         doc["payload_not_available"] = "false";
@@ -914,9 +919,9 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
     };
 
     publishSelect(DESCR_Output_Source_Priority,
-                  "Output Source Priority",
-                  {"Utility first", "Solar first", "SBU priority"},
-                  "{% if value == 'Utility first' %}powmr outputmode UTI{% elif value == 'Solar first' %}powmr outputmode SUB{% else %}powmr outputmode SBU{% endif %}");
+                  "Режим питания нагрузки",
+                  {"UTI — сначала сеть", "SUB — солнце → сеть → батарея", "SBU — солнце → батарея → сеть"},
+                  "{% if value == 'UTI — сначала сеть' %}powmr outputmode UTI{% elif value == 'SUB — солнце → сеть → батарея' %}powmr outputmode SUB{% elif value == 'SBU — солнце → батарея → сеть' %}powmr outputmode SBU{% endif %}");
 
     publishSelect(DESCR_Charger_Source_Priority,
                   "Charger Source Priority",
