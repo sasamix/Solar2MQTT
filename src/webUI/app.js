@@ -1004,6 +1004,40 @@ async function waitForPowmrHunt(data) {
   }
 }
 
+const commandHistoryKey = "solar2mqtt.commandHistory";
+let commandHistory = [];
+
+function renderCommandHistory() {
+  const list = byId("commandHistory");
+  if (!list) return;
+  list.replaceChildren();
+  for (const command of commandHistory) {
+    const option = document.createElement("option");
+    option.value = command;
+    list.appendChild(option);
+  }
+}
+
+function loadCommandHistory() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(commandHistoryKey) || "[]");
+    commandHistory = Array.isArray(saved)
+      ? [...new Set(saved.filter(value => typeof value === "string" && value.trim() && value.length <= 256))].slice(0, 50)
+      : [];
+  } catch (error) {
+    commandHistory = [];
+  }
+  renderCommandHistory();
+}
+
+function rememberCommand(command) {
+  command = command.trim();
+  if (!command || command.length > 256) return;
+  commandHistory = [command, ...commandHistory.filter(value => value !== command)].slice(0, 50);
+  try { localStorage.setItem(commandHistoryKey, JSON.stringify(commandHistory)); } catch (error) {}
+  renderCommandHistory();
+}
+
 async function runConsoleCommand(handler) {
   if (state.commandBusy) return;
   state.commandBusy = true;
@@ -1102,6 +1136,7 @@ function bindClick(id, handler) {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
+  loadCommandHistory();
   connectStatusSocket();
   await Promise.allSettled([loadStatus(), loadSettings()]);
 
@@ -1126,7 +1161,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 
 
   bindSubmit("commandForm", async (form) => {
+    const submittedCommand = byId("commandInput")?.value || "";
     await postForm("/api/command", form);
+    rememberCommand(submittedCommand);
     const commandInput = byId("commandInput");
     if (commandInput) {
       commandInput.value = "";
