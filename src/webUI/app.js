@@ -971,6 +971,39 @@ async function waitForCommandAnswer(intervalMs = 500) {
   }
 }
 
+// Poll status only. Never repeat a baseline/compare when an answer is delayed.
+async function waitForPowmrHunt(data) {
+  if (!getCommandAnswerValue(data).startsWith("POWMR_HUNT RUNNING")) return data;
+  let cancelRequested = false;
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Остановить поиск";
+  cancel.addEventListener("click", () => { cancelRequested = true; cancel.disabled = true; });
+  byId("commandForm")?.appendChild(cancel);
+  try {
+    while (getCommandAnswerValue(data).startsWith("POWMR_HUNT RUNNING")) {
+      setText("commandAnswer", getCommandAnswerValue(data));
+      showNotice("Поиск регистров выполняется. Ждём завершения…");
+      await new Promise((resolve) => window.setTimeout(resolve, 3000));
+      const body = new URLSearchParams();
+      body.set("command", cancelRequested ? "powmr hunt cancel" : "powmr hunt status");
+      // Status/cancel are idempotent, unlike start. A lost HTTP reply is safe to retry.
+      try {
+        await fetchJson("/api/command", { method: "POST", body });
+        data = await waitForCommandAnswer();
+      } catch (error) {
+        showNotice("Связь прервалась. Продолжаем ждать результат…");
+      }
+    }
+    const resultBody = new URLSearchParams();
+    resultBody.set("command", "powmr hunt result");
+    await fetchJson("/api/command", { method: "POST", body: resultBody });
+    return await waitForCommandAnswer();
+  } finally {
+    cancel.remove();
+  }
+}
+
 async function runConsoleCommand(handler) {
   if (state.commandBusy) return;
   state.commandBusy = true;
@@ -1098,7 +1131,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (commandInput) {
       commandInput.value = "";
     }
-    const data = await waitForCommandAnswer();
+    let data = await waitForCommandAnswer();
+    data = await waitForPowmrHunt(data);
     setText("commandAnswer", data.RawData?.CommandAnswer || "-");
 
     const preview = byId("dataPreview");

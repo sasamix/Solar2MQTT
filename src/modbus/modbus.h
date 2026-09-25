@@ -6,6 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include "modbus_com.h"
+#include "powmr_hunt.h"
 #include "device/modbus_device.h"
 #include "device/must_pv_ph18/must_pv_ph18.h"
 #include "device/deye/deye.h"
@@ -77,6 +78,9 @@ private:
     void stabilizeSerial();
     static void powmrDumpTask(void *param);
     void runPowmrDump();
+    PowmrHunt _powmrHunt;
+    void stepPowmrHunt();
+    String powmrHuntCommand(String command);
     void capturePowmrSocSample();
     String buildPowmrSocDiag() const;
 

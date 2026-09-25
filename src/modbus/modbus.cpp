@@ -146,6 +146,7 @@ void MODBUS::loop()
         }
     }
 
+    stepPowmrHunt();
     previousTime = millis();
 }
 
@@ -396,8 +397,13 @@ void MODBUS::runPowmrDump()
 }
 String MODBUS::requestData(String command)
 {
-    requestStaticData = true;
     command.trim();
+    if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
+        command.startsWith("powmr hunt"))
+        return powmrHuntCommand(command);
+    if (_powmrHunt.running && (command == "powmr dump" || command.startsWith("powmr scan ")))
+        return "ERROR: stop hunt before starting another diagnostic scan";
+    requestStaticData = true;
 
     // In-RAM SOC history sampled every five minutes from PowMr live registers.
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
@@ -456,7 +462,7 @@ String MODBUS::requestData(String command)
     // Correlation helper for unknown PowMr registers.
     // First call stores a baseline; later calls show only changed registers.
     if (device != nullptr && device->getProtocol() == MODBUS_POWMR &&
-        command == "powmr watch")
+        (command == "powmr watch" || command == "powmr watch reset"))
     {
         if (_powmrDumpRunning)
             return "ERROR: wait for PowMr diagnostic scan to finish";
@@ -485,7 +491,7 @@ String MODBUS::requestData(String command)
         answer.reserve(5000);
         const uint32_t nowSec = millis() / 1000UL;
 
-        if (!_powmrWatchValid)
+        if (!_powmrWatchValid || command == "powmr watch reset")
         {
             answer = "POWMR_WATCH BASELINE\n";
             for (uint8_t i = 0; i < kPowMrWatchCount; ++i)
@@ -501,7 +507,7 @@ String MODBUS::requestData(String command)
             }
             _powmrWatchValid = true;
             _powmrWatchCapturedAt = nowSec;
-            answer += "Run 'powmr watch' again later to show changes only.";
+            answer += "Fixed baseline. Run 'powmr watch' to compare; 'powmr watch reset' to replace baseline.";
             return answer;
         }
 
@@ -538,9 +544,7 @@ String MODBUS::requestData(String command)
         answer += "/";
         answer += static_cast<unsigned int>(kPowMrWatchCount);
 
-        for (uint8_t i = 0; i < kPowMrWatchCount; ++i)
-            _powmrWatchValues[i] = current[i];
-        _powmrWatchCapturedAt = nowSec;
+        answer += "\nBaseline unchanged; use powmr watch reset to replace it.";
         return answer;
     }
 
