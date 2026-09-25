@@ -201,6 +201,7 @@
       "Network settings saved.": "Настройки сети сохранены.",
       "MQTT settings applied.": "Настройки MQTT применены.",
       "Device settings applied.": "Настройки устройства применены.",
+      "Command sent. Waiting for answer...": "Команда отправлена. Ждём ответа…",
       "Command answer received.": "Ответ команды получен.",
       "Command sent. No answer received yet.": "Команда отправлена. Ответ пока не получен.",
       "Firmware uploaded. Restart is being prepared.": "Прошивка загружена. Подготавливается перезагрузка.",

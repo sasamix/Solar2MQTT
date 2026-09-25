@@ -1,6 +1,8 @@
 const state = {
   statusSocket: null,
   toastTimer: null,
+  commandBusy: false,
+  commandWaiting: false,
   previewFocusTimers: {},
   reportContext: null,
 };
@@ -76,6 +78,10 @@ function getDeviceFirmwareVersion(data = {}) {
 }
 
 function showNotice(message, isError = false) {
+  if (state.commandWaiting) {
+    message = "Command sent. Waiting for answer...";
+    isError = false;
+  }
   const toast = byId("toast");
   const toastIcon = byId("toast-icon");
   const toastMessage = byId("toast-msg");
@@ -90,7 +96,7 @@ function showNotice(message, isError = false) {
     if (state.toastTimer) {
       window.clearTimeout(state.toastTimer);
     }
-    state.toastTimer = window.setTimeout(() => {
+    state.toastTimer = state.commandWaiting ? null : window.setTimeout(() => {
       toast.classList.remove("show");
     }, 2800);
   }
@@ -111,6 +117,7 @@ function showNotice(message, isError = false) {
 }
 
 function clearNotice() {
+  if (state.commandWaiting) return;
   const toast = byId("toast");
   if (toast) {
     toast.classList.remove("show");
@@ -946,19 +953,38 @@ function getCommandAnswerValue(data) {
   return typeof answer === "string" ? answer.trim() : "";
 }
 
-async function waitForCommandAnswer(timeoutMs = 3500, intervalMs = 150) {
-  const startedAt = Date.now();
-  let lastData = {};
-
-  while ((Date.now() - startedAt) < timeoutMs) {
-    lastData = (await fetchJson("/api/data")) || {};
-    if (getCommandAnswerValue(lastData)) {
-      return lastData;
+async function waitForCommandAnswer(intervalMs = 500) {
+  state.commandWaiting = true;
+  showNotice("Command sent. Waiting for answer...");
+  try {
+    while (true) {
+      try {
+        const data = (await fetchJson("/api/data", { cache: "no-store" })) || {};
+        if (getCommandAnswerValue(data)) return data;
+      } catch (error) {
+        // A temporary polling failure must not resend the command or end the wait.
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
     }
-    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  } finally {
+    state.commandWaiting = false;
   }
+}
 
-  return lastData;
+async function runConsoleCommand(handler) {
+  if (state.commandBusy) return;
+  state.commandBusy = true;
+  const controls = [...document.querySelectorAll(
+    '#commandForm button, #commandForm input[type="submit"], #socDiagBtn, #bmsDiagBtn, #powmrWatchBtn'
+  )];
+  const disabled = controls.map((node) => node.disabled);
+  controls.forEach((node) => { node.disabled = true; });
+  try {
+    return await handler();
+  } finally {
+    state.commandBusy = false;
+    controls.forEach((node, index) => { node.disabled = disabled[index]; });
+  }
 }
 
 function focusPreview(previewId) {
@@ -1008,7 +1034,13 @@ function bindSubmit(formId, handler) {
     clearNotice();
 
     try {
-      await handler(event.currentTarget);
+      const form = event.currentTarget;
+      if (formId === "commandForm") {
+        if (!byId("commandInput")?.value.trim()) return;
+        await runConsoleCommand(() => handler(form));
+      } else {
+        await handler(form);
+      }
     } catch (error) {
       showNotice(error.message, true);
     }
@@ -1025,7 +1057,11 @@ function bindClick(id, handler) {
     clearNotice();
 
     try {
-      await handler();
+      if (["socDiagBtn", "bmsDiagBtn", "powmrWatchBtn"].includes(id)) {
+        await runConsoleCommand(handler);
+      } else {
+        await handler();
+      }
     } catch (error) {
       showNotice(error.message, true);
     }
