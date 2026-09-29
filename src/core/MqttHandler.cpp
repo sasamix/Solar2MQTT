@@ -750,7 +750,13 @@ void MqttHandler::publishHaSection(JsonDocument &snapshot,
         }
 
         JsonDocument doc;
-        doc["name"] = key;
+        doc["name"] = (descriptor != nullptr && descriptor->displayName != nullptr && descriptor->displayName[0] != '\0')
+                          ? descriptor->displayName
+                          : key;
+        if (descriptor != nullptr && descriptor->defaultEntityId != nullptr && descriptor->defaultEntityId[0] != '\0')
+        {
+            doc["default_entity_id"] = descriptor->defaultEntityId;
+        }
         doc["state_topic"] = topicBase + "/" + stateSection + "/" + key;
         doc["availability_topic"] = availabilityTopic;
         doc["payload_available"] = "true";
