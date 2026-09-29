@@ -660,18 +660,30 @@ void EnergyBacklog::updateBatteryEnergy(SolarState &state,
     valid = valid && voltage >= 5.0 && voltage <= 1000.0;
 
     int8_t direction = 0;
+    double chargingPowerW = 0.0;
+    double dischargingPowerW = 0.0;
+
     if (valid && netCurrent > 0.01)
     {
         direction = 1;
+        chargingPowerW = voltage * netCurrent;
     }
     else if (valid && netCurrent < -0.01)
     {
         direction = -1;
+        dischargingPowerW = voltage * (-netCurrent);
     }
+
+    // These two locally calculated power sensors intentionally use their own
+    // LiveData keys. Some protocols already expose Battery_Charging_Power;
+    // keeping the calculated pair separate avoids changing existing MQTT
+    // topics while allowing migration from HA template helpers.
+    live[DESCR_Battery_Charging_Power_Calculated] = chargingPowerW;
+    live[DESCR_Battery_Discharging_Power_Calculated] = dischargingPowerW;
 
     if (valid && direction != 0)
     {
-        const double powerW = voltage * (direction > 0 ? netCurrent : -netCurrent);
+        const double powerW = direction > 0 ? chargingPowerW : dischargingPowerW;
         const double energyWh = powerW * static_cast<double>(elapsedMs) / 3600000.0;
 
         if (direction > 0)
