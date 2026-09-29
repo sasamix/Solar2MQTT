@@ -1,5 +1,9 @@
 Release Notes
 
+- 2.0.18H fixes Home Assistant long-term statistics for live physical measurements published through MQTT Discovery.
+- Battery SOC now publishes `state_class: measurement`, so `sensor.solar2mqtt_battery_percent` can be selected as battery state of charge in the Home Assistant Energy dashboard.
+- The same statistics metadata is added consistently to live voltage, current, power, apparent-power, frequency and temperature sensors.
+
 - 2.0.18G adds persistent LittleFS storage for cumulative PV/grid energy counters while MQTT is offline.
 - Saved counter samples survive ESP32 reboots and are replayed in order to the normal `LiveData/*` MQTT topics after reconnect.
 - Backlog replay is batched, retained topics are finalized with the current live snapshot, and the backlog file is deleted only after a complete successful replay.
