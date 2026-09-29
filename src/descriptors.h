@@ -105,6 +105,8 @@
 #define DESCR_Battery_Average_Current "Battery_Average_Current"
 #define DESCR_Battery_Average_Power "Battery_Average_Power"
 #define DESCR_Battery_Charging_Power "Battery_Charging_Power"
+#define DESCR_Battery_Charge_Energy "Battery_Charge_Energy"
+#define DESCR_Battery_Discharge_Energy "Battery_Discharge_Energy"
 #define DESCR_PV_Input_Power "PV_Input_Power"
 #define DESCR_PV_Charge_Current "PV_Charge_Current"
 // QPIGS2

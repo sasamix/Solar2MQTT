@@ -9,6 +9,8 @@ struct HaEntityDescriptor
     const char *unit;
     const char *deviceClass;
     const char *stateClass = nullptr;
+    const char *displayName = nullptr;
+    const char *defaultEntityId = nullptr;
 };
 
 static constexpr const char *HA_UNIT_CELSIUS = "\xC2\xB0"
@@ -113,6 +115,8 @@ static const HaEntityDescriptor HA_LIVE_DESCRIPTORS[] = {
     {DESCR_Battery_Average_Current, "battery-outline", "A", "current", "measurement"},
     {DESCR_Battery_Average_Power, "battery-outline", "W", "power", "measurement"},
     {DESCR_Battery_Charging_Power, "battery-charging-high", "W", "power", "measurement"},
+    {DESCR_Battery_Charge_Energy, "battery-plus", "kWh", "energy", "total_increasing", "Зарядка батареи", "sensor.zariadka_batarei"},
+    {DESCR_Battery_Discharge_Energy, "battery-minus", "kWh", "energy", "total_increasing", "Разрядка батареи", "sensor.razriadka_batarei"},
     {DESCR_Battery_Discharge_Current, "battery-minus-outline", "A", "current", "measurement"},
     {DESCR_Battery_Load, "battery-outline", "A", "current", "measurement"},
     {DESCR_Battery_Percent, "battery-high", "%", "battery", "measurement"},
