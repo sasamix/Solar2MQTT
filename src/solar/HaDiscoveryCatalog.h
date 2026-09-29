@@ -66,6 +66,7 @@ static const HaNameTranslation HA_RU_NAMES[] = {
     {DESCR_PV_Power_Balance, "Баланс мощности PV"},
     {DESCR_Record_Fault_Code_Enabled, "Запись кодов ошибок"},
     {DESCR_Solar_Power_Priority, "Приоритет солнечной энергии"},
+    {DESCR_Solar_Feed_To_Grid_Enabled, "Разрешение отдачи в сеть"},
     {DESCR_Topology, "Топология инвертора"},
 
     {DESCR_AC_In_Frequency, "Частота входа AC"},
@@ -252,6 +253,7 @@ static const HaEntityDescriptor HA_STATIC_DESCRIPTORS[] = {
     {DESCR_PV_Power_Balance, "solar-panel", "", ""},
     {DESCR_Record_Fault_Code_Enabled, "playlist-check", "", ""},
     {DESCR_Solar_Power_Priority, "priority-high", "", ""},
+    {DESCR_Solar_Feed_To_Grid_Enabled, "transmission-tower-export", "", ""},
     {DESCR_Topology, "transmission-tower", "", ""},
 };
 

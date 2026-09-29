@@ -53,6 +53,8 @@ private:
     bool _haDiscoverySweepPowMr;
     unsigned long _haDiscoverySweepStartedMs;
     String _haDiscoverySweepTopic;
+    bool _pendingDelayedHaDiscovery;
+    unsigned long _delayedHaDiscoveryAt;
     unsigned long _lastReconnectAttempt;
     unsigned long _lastAlivePublish;
     unsigned long _lastStatePublish;

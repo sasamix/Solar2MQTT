@@ -1,5 +1,12 @@
 Release Notes
 
+- 2.0.18J completes the Home Assistant entity migration started in 2.0.18I.
+- Explicitly removes retained discovery for obsolete PowMr debug/status entities: `PowMr_Debug_4556`, `PowMr_Debug_4558`, `PowMr_Debug_4559`, `PowMr_Debug_4560`, `PowMr_Debug_4561`, `PowMr_Status_Flags_1`, `PowMr_Status_Flags_2`, and `PowMr_Settings_Flags`.
+- Explicitly removes legacy generic sensor/binary_sensor duplicates for PowMr settings now represented by dedicated select/number entities.
+- Runs a second forced Home Assistant Discovery refresh 10 seconds after MQTT connection so static DeviceData entities are republished with Russian display names after inverter static polling completes.
+- Keeps the useful `Solar_Feed_To_Grid_Enabled` entity and publishes it as «Разрешение отдачи в сеть».
+- Existing entity_id/unique_id values for supported entities are preserved.
+
 - 2.0.18I cleans up Home Assistant MQTT Discovery and localizes Solar2MQTT entity names to Russian.
 - All explicitly supported static/live Solar2MQTT sensors now publish Russian display names while existing entity_id/unique_id values remain unchanged.
 - ESP32 internal temperature and DS18B20 discovery names are localized to Russian.
