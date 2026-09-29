@@ -1,5 +1,11 @@
 Release Notes
 
+- 2.0.18G adds persistent LittleFS storage for cumulative PV/grid energy counters while MQTT is offline.
+- Saved counter samples survive ESP32 reboots and are replayed in order to the normal `LiveData/*` MQTT topics after reconnect.
+- Backlog replay is batched, retained topics are finalized with the current live snapshot, and the backlog file is deleted only after a complete successful replay.
+- Offline writes are compact binary snapshots, throttled to five-minute intervals (plus immediate offline entry and counter reset detection) to reduce flash wear.
+- All supported ESP32 targets now use the shared dual-OTA + 384 KiB LittleFS backlog partition layout.
+
 - Web UI now loads full HTML pages without server-side placeholders; dynamic data comes from `/meta` and `/config`.
 - Debug page adds a serial loopback test and a downloadable debug report for current raw/parsed data.
 - Favicon is served as `favicon.ico` and the GitHub update check is cached to reduce browser/heap load.
