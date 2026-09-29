@@ -106,6 +106,15 @@ void purgeHaDiscoveryKey(PubSubClient &client, const String &deviceId, const cha
     }
 }
 
+void purgeHaDiscoveryComponent(PubSubClient &client,
+                               const String &deviceId,
+                               const char *component,
+                               const char *key)
+{
+    const String topic = buildDiscoveryTopic(deviceId, component, key);
+    client.publish(topic.c_str(), "", true);
+}
+
 bool stringEqualsAny(const char *value, const char *const *items, size_t count)
 {
     if (value == nullptr)
@@ -360,6 +369,8 @@ MqttHandler::MqttHandler(SolarState &state, WiFiManager &wifiManager, SolarInver
       _haDiscoverySweepPowMr(false),
       _haDiscoverySweepStartedMs(0),
       _haDiscoverySweepTopic(),
+      _pendingDelayedHaDiscovery(false),
+      _delayedHaDiscoveryAt(0),
       _lastReconnectAttempt(0),
       _lastAlivePublish(0),
       _lastStatePublish(0)
@@ -384,6 +395,8 @@ void MqttHandler::begin()
     _haDiscoverySweepPowMr = false;
     _haDiscoverySweepStartedMs = 0;
     _haDiscoverySweepTopic = "";
+    _pendingDelayedHaDiscovery = false;
+    _delayedHaDiscoveryAt = 0;
     _energyBacklog.begin();
 }
 
@@ -409,6 +422,8 @@ void MqttHandler::reconfigure()
     _haDiscoverySweepPowMr = false;
     _haDiscoverySweepStartedMs = 0;
     _haDiscoverySweepTopic = "";
+    _pendingDelayedHaDiscovery = false;
+    _delayedHaDiscoveryAt = 0;
     _energyBacklog.cancelReplay();
 }
 
@@ -427,6 +442,18 @@ void MqttHandler::loop()
                 (now - _haDiscoverySweepStartedMs) >= 5000UL)
             {
                 stopHaDiscoverySweep();
+            }
+
+            if (_pendingDelayedHaDiscovery &&
+                static_cast<int32_t>(now - _delayedHaDiscoveryAt) >= 0)
+            {
+                _pendingDelayedHaDiscovery = false;
+                if (_settings.get.mqttHAEnabled())
+                {
+                    _pendingHaDiscovery = true;
+                    _forceHaDiscovery = true;
+                    writeLog("[HA] Delayed forced discovery refresh");
+                }
             }
         }
     }
@@ -690,6 +717,58 @@ bool MqttHandler::ensureConnected()
     setupSubscriptions();
     publishAlive();
     startHaDiscoverySweep();
+
+    // Explicit migration cleanup for legacy PowMr diagnostic entities and
+    // generic sensor duplicates that were created before settings received
+    // dedicated select/number discovery entities.
+    {
+        const String deviceId = getHaDeviceId();
+
+        const char *const obsoleteDebugKeys[] = {
+            "PowMr_Debug_4556",
+            "PowMr_Debug_4558",
+            "PowMr_Debug_4559",
+            "PowMr_Debug_4560",
+            "PowMr_Debug_4561",
+            "PowMr_Status_Flags_1",
+            "PowMr_Status_Flags_2",
+            "PowMr_Settings_Flags",
+        };
+        for (const char *key : obsoleteDebugKeys)
+        {
+            purgeHaDiscoveryKey(_mqtt, deviceId, key);
+        }
+
+        const char *const oldSettingSensorKeys[] = {
+            DESCR_Charger_Source_Priority,
+            DESCR_Output_Source_Priority,
+            DESCR_Input_Voltage_Range,
+            "Battery_Type",
+            DESCR_AC_Out_Rating_Frequency,
+            DESCR_Current_Max_Charging_Current,
+            DESCR_AC_Out_Rating_Voltage,
+            DESCR_Current_Max_AC_Charging_Current,
+            DESCR_Battery_Recharge_Voltage,
+            DESCR_Battery_Redischarge_Voltage,
+            DESCR_Battery_Bulk_Voltage,
+            DESCR_Battery_Float_Voltage,
+            DESCR_Battery_Under_Voltage,
+            "Battery_Equalization_Voltage",
+            "Battery_Equalization_Time",
+            "Battery_Equalization_Timeout",
+            "Battery_Equalization_Interval",
+        };
+        for (const char *key : oldSettingSensorKeys)
+        {
+            purgeHaDiscoveryComponent(_mqtt, deviceId, "sensor", key);
+            purgeHaDiscoveryComponent(_mqtt, deviceId, "binary_sensor", key);
+        }
+    }
+
+    // Run one more forced discovery after startup/static polling settles so
+    // retained DeviceData configs are guaranteed to receive the Russian names.
+    _pendingDelayedHaDiscovery = _settings.get.mqttHAEnabled();
+    _delayedHaDiscoveryAt = millis() + 10000UL;
 
     // Remove stale Home Assistant entities created by an earlier, incorrect
     // assumption that PowMr/Victor lithium menu 12/13 values were SOC.
