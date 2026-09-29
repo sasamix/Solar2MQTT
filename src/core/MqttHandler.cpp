@@ -283,8 +283,13 @@ void MqttHandler::loop()
         }
     }
 
-    // Keep the cumulative PV/grid energy counters in LittleFS while MQTT is
-    // unavailable. Inverter polling continues independently from MQTT.
+    // Battery charge/discharge totals are accumulated locally from the
+    // freshest inverter voltage/current readings. This runs independently
+    // from MQTT so an outage never creates an energy gap.
+    _energyBacklog.updateBatteryEnergy(_state, _inverterService.isConnected(), now);
+
+    // Keep the cumulative inverter-reported PV/grid energy counters in
+    // LittleFS while MQTT is unavailable.
     _energyBacklog.captureIfNeeded(_state, _configured && !connected, now);
 
     if (!_configured)
@@ -407,6 +412,11 @@ void MqttHandler::publishSensorImmediate(uint8_t index, float temperature)
     char payload[16];
     snprintf(payload, sizeof(payload), "%.2f", static_cast<double>(temperature));
     _mqtt.publish(topic.c_str(), payload, true);
+}
+
+void MqttHandler::flushPersistentEnergy()
+{
+    _energyBacklog.flushBatteryEnergy();
 }
 
 void MqttHandler::globalCallback(char *topic, uint8_t *payload, unsigned int length)
