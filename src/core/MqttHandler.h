@@ -7,6 +7,7 @@
 #include <WiFiClientSecure.h>
 #include <vector>
 
+#include "core/EnergyBacklog.h"
 #include "solar/HaDiscoveryCatalog.h"
 
 class SolarState;
@@ -38,6 +39,7 @@ private:
     WiFiClientSecure _secureClient;
     Client *_netClient;
     PubSubClient _mqtt;
+    EnergyBacklog _energyBacklog;
 
     bool _pendingFullPublish;
     bool _pendingHaDiscovery;
@@ -45,6 +47,7 @@ private:
     bool _pendingLegacyDs18Cleanup;
     bool _configured;
     bool _lastConnected;
+    bool _replayingEnergyBacklog;
     unsigned long _lastReconnectAttempt;
     unsigned long _lastAlivePublish;
     unsigned long _lastStatePublish;
