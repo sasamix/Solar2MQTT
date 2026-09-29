@@ -96,6 +96,137 @@ String buildDiscoveryTopic(const String &baseTopic, const char *component, const
     return String("homeassistant/") + component + "/" + baseTopic + "/" + key + "/config";
 }
 
+void purgeHaDiscoveryKey(PubSubClient &client, const String &deviceId, const char *key)
+{
+    const char *const components[] = {"sensor", "binary_sensor", "number", "select"};
+    for (const char *component : components)
+    {
+        const String topic = buildDiscoveryTopic(deviceId, component, key);
+        client.publish(topic.c_str(), "", true);
+    }
+}
+
+bool stringEqualsAny(const char *value, const char *const *items, size_t count)
+{
+    if (value == nullptr)
+    {
+        return false;
+    }
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (strcmp(value, items[i]) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool isApprovedHaDiscoveryKey(const char *component, const char *key, bool powMr)
+{
+    if (component == nullptr || key == nullptr)
+    {
+        return false;
+    }
+
+    if (strcmp(component, "sensor") == 0 || strcmp(component, "binary_sensor") == 0)
+    {
+        if (strcmp(key, DESCR_ESP_Internal_Temperature) == 0 ||
+            strncmp(key, "DS18B20_", 8) == 0)
+        {
+            return true;
+        }
+
+        // PowMr writable settings are exposed as select/number entities.
+        // Purge older generic sensor discovery for the same keys.
+        if (powMr && isPowMrWritableSettingKey(key))
+        {
+            return false;
+        }
+
+        return findDescriptor(key,
+                              HA_STATIC_DESCRIPTORS,
+                              sizeof(HA_STATIC_DESCRIPTORS) / sizeof(HaEntityDescriptor)) != nullptr ||
+               findDescriptor(key,
+                              HA_LIVE_DESCRIPTORS,
+                              sizeof(HA_LIVE_DESCRIPTORS) / sizeof(HaEntityDescriptor)) != nullptr;
+    }
+
+    if (!powMr)
+    {
+        return false;
+    }
+
+    if (strcmp(component, "select") == 0)
+    {
+        const char *const selectKeys[] = {
+            DESCR_Output_Source_Priority,
+            DESCR_Charger_Source_Priority,
+            DESCR_Input_Voltage_Range,
+            "Battery_Type",
+            DESCR_AC_Out_Rating_Frequency,
+        };
+        return stringEqualsAny(key, selectKeys, sizeof(selectKeys) / sizeof(selectKeys[0]));
+    }
+
+    if (strcmp(component, "number") == 0)
+    {
+        const char *const numberKeys[] = {
+            DESCR_Current_Max_Charging_Current,
+            DESCR_AC_Out_Rating_Voltage,
+            DESCR_Current_Max_AC_Charging_Current,
+            DESCR_Battery_Recharge_Voltage,
+            DESCR_Battery_Redischarge_Voltage,
+            DESCR_Battery_Bulk_Voltage,
+            DESCR_Battery_Float_Voltage,
+            DESCR_Battery_Under_Voltage,
+            "Battery_Equalization_Voltage",
+            "Battery_Equalization_Time",
+            "Battery_Equalization_Timeout",
+            "Battery_Equalization_Interval",
+        };
+        return stringEqualsAny(key, numberKeys, sizeof(numberKeys) / sizeof(numberKeys[0]));
+    }
+
+    return false;
+}
+
+bool parseOwnHaDiscoveryTopic(const String &topic,
+                              const String &deviceId,
+                              String &component,
+                              String &key)
+{
+    const String prefix = "homeassistant/";
+    if (!topic.startsWith(prefix) || !topic.endsWith("/config"))
+    {
+        return false;
+    }
+
+    const int componentEnd = topic.indexOf('/', prefix.length());
+    if (componentEnd < 0)
+    {
+        return false;
+    }
+
+    component = topic.substring(prefix.length(), componentEnd);
+
+    const String deviceMarker = "/" + deviceId + "/";
+    if (!topic.substring(componentEnd).startsWith(deviceMarker))
+    {
+        return false;
+    }
+
+    const int keyStart = componentEnd + deviceMarker.length();
+    const int keyEnd = topic.length() - 7; // strlen("/config")
+    if (keyEnd <= keyStart)
+    {
+        return false;
+    }
+
+    key = topic.substring(keyStart, keyEnd);
+    return key.length() > 0;
+}
+
 String sanitizeRawMqttText(const char *value)
 {
     if (value == nullptr || value[0] == '\0')
@@ -225,6 +356,10 @@ MqttHandler::MqttHandler(SolarState &state, WiFiManager &wifiManager, SolarInver
       _configured(false),
       _lastConnected(false),
       _replayingEnergyBacklog(false),
+      _haDiscoverySweepActive(false),
+      _haDiscoverySweepPowMr(false),
+      _haDiscoverySweepStartedMs(0),
+      _haDiscoverySweepTopic(),
       _lastReconnectAttempt(0),
       _lastAlivePublish(0),
       _lastStatePublish(0)
@@ -245,6 +380,10 @@ void MqttHandler::begin()
     _pendingLegacyDs18Cleanup = true;
     _haDiscoveryTopics.clear();
     _replayingEnergyBacklog = false;
+    _haDiscoverySweepActive = false;
+    _haDiscoverySweepPowMr = false;
+    _haDiscoverySweepStartedMs = 0;
+    _haDiscoverySweepTopic = "";
     _energyBacklog.begin();
 }
 
@@ -266,6 +405,10 @@ void MqttHandler::reconfigure()
     _lastStatePublish = millis();
     _haDiscoveryTopics.clear();
     _replayingEnergyBacklog = false;
+    _haDiscoverySweepActive = false;
+    _haDiscoverySweepPowMr = false;
+    _haDiscoverySweepStartedMs = 0;
+    _haDiscoverySweepTopic = "";
     _energyBacklog.cancelReplay();
 }
 
@@ -280,6 +423,11 @@ void MqttHandler::loop()
         if (connected)
         {
             _mqtt.loop();
+            if (_haDiscoverySweepActive &&
+                (now - _haDiscoverySweepStartedMs) >= 5000UL)
+            {
+                stopHaDiscoverySweep();
+            }
         }
     }
 
@@ -437,6 +585,23 @@ void MqttHandler::handleMessage(char *topic, uint8_t *payload, unsigned int leng
     }
 
     const String topicString(topic);
+
+    if (_haDiscoverySweepActive)
+    {
+        String component;
+        String key;
+        if (parseOwnHaDiscoveryTopic(topicString, getHaDeviceId(), component, key))
+        {
+            if (length > 0 &&
+                !isApprovedHaDiscoveryKey(component.c_str(), key.c_str(), _haDiscoverySweepPowMr))
+            {
+                _mqtt.publish(topicString.c_str(), "", true);
+                writeLog("[HA] Removed stale discovery: %s", topicString.c_str());
+            }
+            return;
+        }
+    }
+
     if (strlen(_settings.get.mqttTriggerPath()) > 0 && topicString == _settings.get.mqttTriggerPath())
     {
         triggerFullStatePublish();
@@ -524,6 +689,7 @@ bool MqttHandler::ensureConnected()
 
     setupSubscriptions();
     publishAlive();
+    startHaDiscoverySweep();
 
     // Remove stale Home Assistant entities created by an earlier, incorrect
     // assumption that PowMr/Victor lithium menu 12/13 values were SOC.
@@ -547,6 +713,46 @@ bool MqttHandler::ensureConnected()
 
             const String stateTopic = baseTopic() + "/DeviceData/" + key;
             _mqtt.publish(stateTopic.c_str(), "", true);
+        }
+    }
+
+    // Purge retained Home Assistant Discovery for values that are present in
+    // runtime JSON but are not part of the supported HA catalog. Older builds
+    // auto-discovered every scalar field, so diagnostic/probe values could
+    // survive indefinitely as stale entities in Home Assistant.
+    {
+        JsonDocument snapshot;
+        _state.snapshotTo(snapshot);
+        const String deviceId = getHaDeviceId();
+
+        for (JsonPairConst entry : snapshot["DeviceData"].as<JsonObjectConst>())
+        {
+            const char *key = entry.key().c_str();
+            if (isPowMrWritableSettingKey(key))
+            {
+                continue;
+            }
+            if (findDescriptor(key,
+                               HA_STATIC_DESCRIPTORS,
+                               sizeof(HA_STATIC_DESCRIPTORS) / sizeof(HaEntityDescriptor)) == nullptr)
+            {
+                purgeHaDiscoveryKey(_mqtt, deviceId, key);
+            }
+        }
+
+        for (JsonPairConst entry : snapshot["LiveData"].as<JsonObjectConst>())
+        {
+            const char *key = entry.key().c_str();
+            if (strncmp(key, "DS18B20_", 8) == 0)
+            {
+                continue;
+            }
+            if (findDescriptor(key,
+                               HA_LIVE_DESCRIPTORS,
+                               sizeof(HA_LIVE_DESCRIPTORS) / sizeof(HaEntityDescriptor)) == nullptr)
+            {
+                purgeHaDiscoveryKey(_mqtt, deviceId, key);
+            }
         }
     }
 
@@ -739,6 +945,11 @@ void MqttHandler::publishHaSection(JsonDocument &snapshot,
             continue;
         }
         const HaEntityDescriptor *descriptor = findDescriptor(key, descriptors, descriptorCount);
+        if (descriptor == nullptr)
+        {
+            continue;
+        }
+
         const bool binarySensor = value.is<bool>();
         const char *component = binarySensor ? "binary_sensor" : "sensor";
         const String topic = buildDiscoveryTopic(deviceId, component, key);
@@ -750,10 +961,13 @@ void MqttHandler::publishHaSection(JsonDocument &snapshot,
         }
 
         JsonDocument doc;
-        doc["name"] = (descriptor != nullptr && descriptor->displayName != nullptr && descriptor->displayName[0] != '\0')
-                          ? descriptor->displayName
-                          : key;
-        if (descriptor != nullptr && descriptor->defaultEntityId != nullptr && descriptor->defaultEntityId[0] != '\0')
+        const char *ruName = haRussianName(key);
+        doc["name"] = (ruName != nullptr && ruName[0] != '\0')
+                          ? ruName
+                          : ((descriptor->displayName != nullptr && descriptor->displayName[0] != '\0')
+                                 ? descriptor->displayName
+                                 : key);
+        if (descriptor->defaultEntityId != nullptr && descriptor->defaultEntityId[0] != '\0')
         {
             doc["default_entity_id"] = descriptor->defaultEntityId;
         }
@@ -819,7 +1033,7 @@ void MqttHandler::publishHaEspInternalTemperature(JsonDocument &snapshot,
     }
 
     JsonDocument doc;
-    doc["name"] = DESCR_ESP_Internal_Temperature;
+    doc["name"] = "Температура ESP32";
     doc["state_topic"] = topicBase + "/EspData/" + DESCR_ESP_Internal_Temperature;
     doc["availability_topic"] = availabilityTopic;
     doc["payload_available"] = "true";
@@ -863,7 +1077,7 @@ void MqttHandler::publishHaDs18b20(JsonDocument &snapshot, JsonObjectConst liveV
         }
 
         JsonDocument doc;
-        doc["name"] = key;
+        doc["name"] = String("Температура ") + key;
         doc["state_topic"] = topicBase + "/LiveData/" + key;
         doc["availability_topic"] = availabilityTopic;
         doc["payload_available"] = "true";
@@ -1007,37 +1221,74 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
                   "{% if value == 'UTI — сначала сеть' %}powmr outputmode UTI{% elif value == 'SUB — солнце → сеть → батарея' %}powmr outputmode SUB{% elif value == 'SBU — солнце → батарея → сеть' %}powmr outputmode SBU{% endif %}");
 
     publishSelect(DESCR_Charger_Source_Priority,
-                  "Charger Source Priority",
+                  "Приоритет источника зарядки",
                   {"Utility first", "Solar first", "Solar and Utility", "Solar only"},
                   "{% if value == 'Utility first' %}powmr setting chargerpriority UTILITY{% elif value == 'Solar first' %}powmr setting chargerpriority SOLAR{% elif value == 'Solar and Utility' %}powmr setting chargerpriority SOLAR_UTILITY{% else %}powmr setting chargerpriority SOLAR_ONLY{% endif %}");
 
     publishSelect(DESCR_Input_Voltage_Range,
-                  "AC Input Voltage Range",
+                  "Диапазон входного напряжения AC",
                   {"Appliances", "UPS"},
                   "{% if value == 'UPS' %}powmr setting inputrange UPS{% else %}powmr setting inputrange APL{% endif %}");
 
     publishSelect("Battery_Type",
-                  "Battery Type / BMS Protocol",
+                  "Тип АКБ / протокол BMS",
                   {"AGM", "FLD", "USE", "LIB", "LIC", "LIP", "LIL"},
                   "powmr batterytype {{ value }}");
 
     publishSelect(DESCR_AC_Out_Rating_Frequency,
-                  "AC Output Frequency",
+                  "Частота выхода AC",
                   {"50", "60"},
                   "powmr setting outputfreq {{ value }}");
 
-    publishNumber(DESCR_Current_Max_Charging_Current, "Max Charging Current", "maxcharge", 0, 120, 1, "A");
-    publishNumber(DESCR_AC_Out_Rating_Voltage, "AC Output Voltage", "outputvoltage", 220, 240, 10, "V");
-    publishNumber(DESCR_Current_Max_AC_Charging_Current, "Max Utility Charging Current", "utilitycharge", 0, 120, 1, "A");
-    publishNumber(DESCR_Battery_Recharge_Voltage, "Battery Recharge Voltage", "recharge", 40.0f, 60.0f, 0.1f, "V");
-    publishNumber(DESCR_Battery_Redischarge_Voltage, "Battery Redischarge Voltage", "redischarge", 40.0f, 60.0f, 0.1f, "V");
-    publishNumber(DESCR_Battery_Bulk_Voltage, "Battery Bulk Voltage", "bulk", 40.0f, 60.0f, 0.1f, "V");
-    publishNumber(DESCR_Battery_Float_Voltage, "Battery Float Voltage", "float", 40.0f, 60.0f, 0.1f, "V");
-    publishNumber(DESCR_Battery_Under_Voltage, "Battery Cutoff Voltage", "cutoff", 40.0f, 60.0f, 0.1f, "V");
-    publishNumber("Battery_Equalization_Voltage", "Battery Equalization Voltage", "equalizationvoltage", 40.0f, 60.0f, 0.1f, "V");
-    publishNumber("Battery_Equalization_Time", "Battery Equalization Time", "equalizationtime", 0, 999, 1, "min");
-    publishNumber("Battery_Equalization_Timeout", "Battery Equalization Timeout", "equalizationtimeout", 0, 999, 1, "min");
-    publishNumber("Battery_Equalization_Interval", "Battery Equalization Interval", "equalizationinterval", 0, 999, 1, "d");
+    publishNumber(DESCR_Current_Max_Charging_Current, "Максимальный ток зарядки АКБ", "maxcharge", 0, 120, 1, "A");
+    publishNumber(DESCR_AC_Out_Rating_Voltage, "Напряжение выхода AC", "outputvoltage", 220, 240, 10, "V");
+    publishNumber(DESCR_Current_Max_AC_Charging_Current, "Максимальный ток зарядки от сети", "utilitycharge", 0, 120, 1, "A");
+    publishNumber(DESCR_Battery_Recharge_Voltage, "Напряжение перехода на заряд АКБ", "recharge", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber(DESCR_Battery_Redischarge_Voltage, "Напряжение возврата на АКБ", "redischarge", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber(DESCR_Battery_Bulk_Voltage, "Напряжение основного заряда АКБ", "bulk", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber(DESCR_Battery_Float_Voltage, "Напряжение поддерживающего заряда АКБ", "float", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber(DESCR_Battery_Under_Voltage, "Напряжение отключения АКБ", "cutoff", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber("Battery_Equalization_Voltage", "Напряжение выравнивания АКБ", "equalizationvoltage", 40.0f, 60.0f, 0.1f, "V");
+    publishNumber("Battery_Equalization_Time", "Время выравнивания АКБ", "equalizationtime", 0, 999, 1, "min");
+    publishNumber("Battery_Equalization_Timeout", "Тайм-аут выравнивания АКБ", "equalizationtimeout", 0, 999, 1, "min");
+    publishNumber("Battery_Equalization_Interval", "Интервал выравнивания АКБ", "equalizationinterval", 0, 999, 1, "d");
+}
+
+void MqttHandler::startHaDiscoverySweep()
+{
+    if (!_mqtt.connected() || !_settings.get.mqttHAEnabled())
+    {
+        return;
+    }
+
+    JsonDocument snapshot;
+    _state.snapshotTo(snapshot);
+    const char *protocol = snapshot["Status"]["protocol"] | "";
+    _haDiscoverySweepPowMr = strcmp(protocol, "MODBUS_POWMR") == 0;
+
+    _haDiscoverySweepTopic = String("homeassistant/+/") + getHaDeviceId() + "/+/config";
+    if (_mqtt.subscribe(_haDiscoverySweepTopic.c_str()))
+    {
+        _haDiscoverySweepActive = true;
+        _haDiscoverySweepStartedMs = millis();
+        writeLog("[HA] Discovery cleanup sweep started");
+    }
+}
+
+void MqttHandler::stopHaDiscoverySweep()
+{
+    if (!_haDiscoverySweepActive)
+    {
+        return;
+    }
+
+    if (_mqtt.connected() && _haDiscoverySweepTopic.length() > 0)
+    {
+        _mqtt.unsubscribe(_haDiscoverySweepTopic.c_str());
+    }
+    _haDiscoverySweepActive = false;
+    _haDiscoverySweepTopic = "";
+    writeLog("[HA] Discovery cleanup sweep finished");
 }
 
 bool MqttHandler::hasHaDiscoveryTopic(const String &topic) const
