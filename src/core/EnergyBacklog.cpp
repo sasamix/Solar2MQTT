@@ -209,7 +209,7 @@ void EnergyBacklog::begin()
     repairTrailingPartialRecord();
     resetBatteryEnergyIfFactoryReset();
     loadBatteryEnergyCheckpoint();
-    _batteryLastIntegrateMs = millis();
+    _batteryLastIntegrateMs = 0;
     _batteryLastCheckpointMs = millis();
 
     File file = LittleFS.open(BACKLOG_FILE, "r");
@@ -614,11 +614,10 @@ void EnergyBacklog::updateBatteryEnergy(SolarState &state,
                                         bool inverterConnected,
                                         unsigned long nowMs)
 {
-    publishBatteryEnergyState(state);
-
     if (_batteryLastIntegrateMs == 0)
     {
         _batteryLastIntegrateMs = nowMs;
+        publishBatteryEnergyState(state);
         return;
     }
 
