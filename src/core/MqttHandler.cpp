@@ -106,6 +106,127 @@ void purgeHaDiscoveryKey(PubSubClient &client, const String &deviceId, const cha
     }
 }
 
+bool stringEqualsAny(const char *value, const char *const *items, size_t count)
+{
+    if (value == nullptr)
+    {
+        return false;
+    }
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (strcmp(value, items[i]) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool isApprovedHaDiscoveryKey(const char *component, const char *key, bool powMr)
+{
+    if (component == nullptr || key == nullptr)
+    {
+        return false;
+    }
+
+    if (strcmp(component, "sensor") == 0 || strcmp(component, "binary_sensor") == 0)
+    {
+        if (strcmp(key, DESCR_ESP_Internal_Temperature) == 0 ||
+            strncmp(key, "DS18B20_", 8) == 0)
+        {
+            return true;
+        }
+
+        // PowMr writable settings are exposed as select/number entities.
+        // Purge older generic sensor discovery for the same keys.
+        if (powMr && isPowMrWritableSettingKey(key))
+        {
+            return false;
+        }
+
+        return findDescriptor(key,
+                              HA_STATIC_DESCRIPTORS,
+                              sizeof(HA_STATIC_DESCRIPTORS) / sizeof(HaEntityDescriptor)) != nullptr ||
+               findDescriptor(key,
+                              HA_LIVE_DESCRIPTORS,
+                              sizeof(HA_LIVE_DESCRIPTORS) / sizeof(HaEntityDescriptor)) != nullptr;
+    }
+
+    if (!powMr)
+    {
+        return false;
+    }
+
+    if (strcmp(component, "select") == 0)
+    {
+        const char *const selectKeys[] = {
+            DESCR_Output_Source_Priority,
+            DESCR_Charger_Source_Priority,
+            DESCR_Input_Voltage_Range,
+            "Battery_Type",
+            DESCR_AC_Out_Rating_Frequency,
+        };
+        return stringEqualsAny(key, selectKeys, sizeof(selectKeys) / sizeof(selectKeys[0]));
+    }
+
+    if (strcmp(component, "number") == 0)
+    {
+        const char *const numberKeys[] = {
+            DESCR_Current_Max_Charging_Current,
+            DESCR_AC_Out_Rating_Voltage,
+            DESCR_Current_Max_AC_Charging_Current,
+            DESCR_Battery_Recharge_Voltage,
+            DESCR_Battery_Redischarge_Voltage,
+            DESCR_Battery_Bulk_Voltage,
+            DESCR_Battery_Float_Voltage,
+            DESCR_Battery_Under_Voltage,
+            "Battery_Equalization_Voltage",
+            "Battery_Equalization_Time",
+            "Battery_Equalization_Timeout",
+            "Battery_Equalization_Interval",
+        };
+        return stringEqualsAny(key, numberKeys, sizeof(numberKeys) / sizeof(numberKeys[0]));
+    }
+
+    return false;
+}
+
+bool parseOwnHaDiscoveryTopic(const String &topic,
+                              const String &deviceId,
+                              String &component,
+                              String &key)
+{
+    const String prefix = "homeassistant/";
+    if (!topic.startsWith(prefix) || !topic.endsWith("/config"))
+    {
+        return false;
+    }
+
+    const int componentEnd = topic.indexOf('/', prefix.length());
+    if (componentEnd < 0)
+    {
+        return false;
+    }
+
+    component = topic.substring(prefix.length(), componentEnd);
+
+    const String deviceMarker = "/" + deviceId + "/";
+    if (!topic.substring(componentEnd).startsWith(deviceMarker))
+    {
+        return false;
+    }
+
+    const int keyStart = componentEnd + deviceMarker.length();
+    const int keyEnd = topic.length() - 7; // strlen("/config")
+    if (keyEnd <= keyStart)
+    {
+        return false;
+    }
+
+    key = topic.substring(keyStart, keyEnd);
+    return key.length() > 0;
+}
+
 String sanitizeRawMqttText(const char *value)
 {
     if (value == nullptr || value[0] == '\0')
@@ -235,6 +356,10 @@ MqttHandler::MqttHandler(SolarState &state, WiFiManager &wifiManager, SolarInver
       _configured(false),
       _lastConnected(false),
       _replayingEnergyBacklog(false),
+      _haDiscoverySweepActive(false),
+      _haDiscoverySweepPowMr(false),
+      _haDiscoverySweepStartedMs(0),
+      _haDiscoverySweepTopic(),
       _lastReconnectAttempt(0),
       _lastAlivePublish(0),
       _lastStatePublish(0)
@@ -255,6 +380,10 @@ void MqttHandler::begin()
     _pendingLegacyDs18Cleanup = true;
     _haDiscoveryTopics.clear();
     _replayingEnergyBacklog = false;
+    _haDiscoverySweepActive = false;
+    _haDiscoverySweepPowMr = false;
+    _haDiscoverySweepStartedMs = 0;
+    _haDiscoverySweepTopic = "";
     _energyBacklog.begin();
 }
 
@@ -276,6 +405,10 @@ void MqttHandler::reconfigure()
     _lastStatePublish = millis();
     _haDiscoveryTopics.clear();
     _replayingEnergyBacklog = false;
+    _haDiscoverySweepActive = false;
+    _haDiscoverySweepPowMr = false;
+    _haDiscoverySweepStartedMs = 0;
+    _haDiscoverySweepTopic = "";
     _energyBacklog.cancelReplay();
 }
 
@@ -290,6 +423,11 @@ void MqttHandler::loop()
         if (connected)
         {
             _mqtt.loop();
+            if (_haDiscoverySweepActive &&
+                (now - _haDiscoverySweepStartedMs) >= 5000UL)
+            {
+                stopHaDiscoverySweep();
+            }
         }
     }
 
@@ -447,6 +585,23 @@ void MqttHandler::handleMessage(char *topic, uint8_t *payload, unsigned int leng
     }
 
     const String topicString(topic);
+
+    if (_haDiscoverySweepActive)
+    {
+        String component;
+        String key;
+        if (parseOwnHaDiscoveryTopic(topicString, getHaDeviceId(), component, key))
+        {
+            if (length > 0 &&
+                !isApprovedHaDiscoveryKey(component.c_str(), key.c_str(), _haDiscoverySweepPowMr))
+            {
+                _mqtt.publish(topicString.c_str(), "", true);
+                writeLog("[HA] Removed stale discovery: %s", topicString.c_str());
+            }
+            return;
+        }
+    }
+
     if (strlen(_settings.get.mqttTriggerPath()) > 0 && topicString == _settings.get.mqttTriggerPath())
     {
         triggerFullStatePublish();
@@ -534,6 +689,7 @@ bool MqttHandler::ensureConnected()
 
     setupSubscriptions();
     publishAlive();
+    startHaDiscoverySweep();
 
     // Remove stale Home Assistant entities created by an earlier, incorrect
     // assumption that PowMr/Victor lithium menu 12/13 values were SOC.
@@ -1096,6 +1252,43 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
     publishNumber("Battery_Equalization_Time", "Время выравнивания АКБ", "equalizationtime", 0, 999, 1, "min");
     publishNumber("Battery_Equalization_Timeout", "Тайм-аут выравнивания АКБ", "equalizationtimeout", 0, 999, 1, "min");
     publishNumber("Battery_Equalization_Interval", "Интервал выравнивания АКБ", "equalizationinterval", 0, 999, 1, "d");
+}
+
+void MqttHandler::startHaDiscoverySweep()
+{
+    if (!_mqtt.connected() || !_settings.get.mqttHAEnabled())
+    {
+        return;
+    }
+
+    JsonDocument snapshot;
+    _state.snapshotTo(snapshot);
+    const char *protocol = snapshot["Status"]["protocol"] | "";
+    _haDiscoverySweepPowMr = strcmp(protocol, "MODBUS_POWMR") == 0;
+
+    _haDiscoverySweepTopic = String("homeassistant/+/") + getHaDeviceId() + "/+/config";
+    if (_mqtt.subscribe(_haDiscoverySweepTopic.c_str()))
+    {
+        _haDiscoverySweepActive = true;
+        _haDiscoverySweepStartedMs = millis();
+        writeLog("[HA] Discovery cleanup sweep started");
+    }
+}
+
+void MqttHandler::stopHaDiscoverySweep()
+{
+    if (!_haDiscoverySweepActive)
+    {
+        return;
+    }
+
+    if (_mqtt.connected() && _haDiscoverySweepTopic.length() > 0)
+    {
+        _mqtt.unsubscribe(_haDiscoverySweepTopic.c_str());
+    }
+    _haDiscoverySweepActive = false;
+    _haDiscoverySweepTopic = "";
+    writeLog("[HA] Discovery cleanup sweep finished");
 }
 
 bool MqttHandler::hasHaDiscoveryTopic(const String &topic) const
