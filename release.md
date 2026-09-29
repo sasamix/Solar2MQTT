@@ -1,5 +1,11 @@
 Release Notes
 
+- 2.0.18I adds native cumulative battery charge and discharge energy counters for Home Assistant Energy.
+- `Battery_Charge_Energy` and `Battery_Discharge_Energy` are published in kWh with `device_class: energy` and `state_class: total_increasing`.
+- Energy is integrated locally from actual battery voltage and net battery current, so it no longer depends on a fixed 48 V template.
+- The counters continue accumulating while MQTT is offline, survive ESP32 restarts, use alternating verified LittleFS checkpoints, and are flushed before planned restarts.
+- Checkpoints are also written when battery flow stops or changes direction, limiting flash wear while keeping the totals durable.
+
 - 2.0.18H fixes Home Assistant long-term statistics for live physical measurements published through MQTT Discovery.
 - Battery SOC now publishes `state_class: measurement`, so `sensor.solar2mqtt_battery_percent` can be selected as battery state of charge in the Home Assistant Energy dashboard.
 - The same statistics metadata is added consistently to live voltage, current, power, apparent-power, frequency and temperature sensors.
