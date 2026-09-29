@@ -36,11 +36,13 @@ constexpr size_t ENERGY_KEY_COUNT = sizeof(ENERGY_KEYS) / sizeof(ENERGY_KEYS[0])
 
 struct EnergyRecord
 {
+    // Order fields so the 64-bit counters stay naturally aligned on every
+    // ESP32 family while the on-flash record remains exactly 80 bytes.
     uint32_t magic;
-    uint16_t version;
-    uint16_t mask;
     uint32_t sequence;
     int64_t values[ENERGY_KEY_COUNT];
+    uint16_t version;
+    uint16_t mask;
     uint32_t checksum;
 };
 
