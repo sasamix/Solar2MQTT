@@ -604,7 +604,7 @@ bool EnergyBacklog::saveBatteryEnergyCheckpoint(bool force)
 
 void EnergyBacklog::publishBatteryEnergyState(SolarState &state)
 {
-    JsonObject live = state.doc()["LiveData"].to<JsonObject>();
+    JsonObject live = state.doc()["LiveData"].as<JsonObject>();
     live[DESCR_Battery_Charge_Energy] = _batteryChargeWh / 1000.0;
     live[DESCR_Battery_Discharge_Energy] = _batteryDischargeWh / 1000.0;
     state.refreshBindings();
