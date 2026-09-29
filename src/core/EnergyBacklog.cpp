@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <Preferences.h>
 #include <PubSubClient.h>
 #include <stddef.h>
 
@@ -20,6 +21,14 @@ constexpr uint16_t RECORD_VERSION = 1;
 constexpr unsigned long CAPTURE_INTERVAL_MS = 5UL * 60UL * 1000UL;
 constexpr size_t MAX_BACKLOG_BYTES = 192UL * 1024UL;
 constexpr size_t KEEP_BACKLOG_BYTES = 96UL * 1024UL;
+
+constexpr const char *BATTERY_SLOT_A = "/battery_a.bin";
+constexpr const char *BATTERY_SLOT_B = "/battery_b.bin";
+constexpr uint32_t BATTERY_RECORD_MAGIC = 0x42415445UL; // "BATE"
+constexpr uint16_t BATTERY_RECORD_VERSION = 1;
+constexpr unsigned long BATTERY_INTEGRATE_INTERVAL_MS = 1000UL;
+constexpr unsigned long BATTERY_MAX_SAMPLE_GAP_MS = 10000UL;
+constexpr unsigned long BATTERY_CHECKPOINT_INTERVAL_MS = 2UL * 60UL * 1000UL;
 
 const char *const ENERGY_KEYS[] = {
     DESCR_PV_Generation_Sum,
@@ -49,6 +58,19 @@ struct EnergyRecord
 static_assert(ENERGY_KEY_COUNT == 8, "Energy backlog format expects 8 counters");
 static_assert(sizeof(EnergyRecord) == 80, "Unexpected EnergyRecord size");
 
+struct BatteryEnergyRecord
+{
+    uint32_t magic;
+    uint32_t sequence;
+    uint64_t chargeMilliWh;
+    uint64_t dischargeMilliWh;
+    uint16_t version;
+    uint16_t reserved;
+    uint32_t checksum;
+};
+
+static_assert(sizeof(BatteryEnergyRecord) == 32, "Unexpected BatteryEnergyRecord size");
+
 uint32_t recordChecksum(const EnergyRecord &record)
 {
     const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&record);
@@ -69,6 +91,42 @@ bool recordValid(const EnergyRecord &record)
            record.version == RECORD_VERSION &&
            record.mask != 0 &&
            record.checksum == recordChecksum(record);
+}
+
+uint32_t batteryRecordChecksum(const BatteryEnergyRecord &record)
+{
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&record);
+    const size_t length = offsetof(BatteryEnergyRecord, checksum);
+
+    uint32_t hash = 2166136261UL;
+    for (size_t i = 0; i < length; ++i)
+    {
+        hash ^= bytes[i];
+        hash *= 16777619UL;
+    }
+    return hash;
+}
+
+bool batteryRecordValid(const BatteryEnergyRecord &record)
+{
+    return record.magic == BATTERY_RECORD_MAGIC &&
+           record.version == BATTERY_RECORD_VERSION &&
+           record.checksum == batteryRecordChecksum(record);
+}
+
+bool readBatteryRecord(const char *path, BatteryEnergyRecord &record)
+{
+    File file = LittleFS.open(path, "r");
+    if (!file)
+    {
+        return false;
+    }
+
+    const bool ok = file.size() == sizeof(record) &&
+                    file.read(reinterpret_cast<uint8_t *>(&record), sizeof(record)) == sizeof(record) &&
+                    batteryRecordValid(record);
+    file.close();
+    return ok;
 }
 
 bool readEnergyValues(SolarState &state, EnergyRecord &record)
@@ -127,7 +185,14 @@ EnergyBacklog::EnergyBacklog()
       _lastCaptureMs(0),
       _nextSequence(1),
       _replayOffset(0),
-      _lastMask(0)
+      _lastMask(0),
+      _batteryChargeWh(0.0),
+      _batteryDischargeWh(0.0),
+      _batteryLastIntegrateMs(0),
+      _batteryLastCheckpointMs(0),
+      _batteryCheckpointSequence(0),
+      _batteryDirection(0),
+      _batteryDirty(false)
 {
     memset(_lastValues, 0, sizeof(_lastValues));
 }
@@ -142,6 +207,10 @@ void EnergyBacklog::begin()
     }
 
     repairTrailingPartialRecord();
+    resetBatteryEnergyIfFactoryReset();
+    loadBatteryEnergyCheckpoint();
+    _batteryLastIntegrateMs = millis();
+    _batteryLastCheckpointMs = millis();
 
     File file = LittleFS.open(BACKLOG_FILE, "r");
     if (file)
@@ -421,6 +490,226 @@ bool EnergyBacklog::repairTrailingPartialRecord()
     writeLog("[EnergyBacklog] Recovered torn write; dropped %u trailing bytes",
              static_cast<unsigned>(currentSize - alignedSize));
     return true;
+}
+
+void EnergyBacklog::resetBatteryEnergyIfFactoryReset()
+{
+    Preferences prefs;
+    if (!prefs.begin("batenergy", false))
+    {
+        return;
+    }
+
+    const bool initialized = prefs.getBool("initialized", false);
+    if (!initialized)
+    {
+        LittleFS.remove(BATTERY_SLOT_A);
+        LittleFS.remove(BATTERY_SLOT_B);
+        prefs.putBool("initialized", true);
+        writeLog("[BatteryEnergy] Initialized fresh persistent counters");
+    }
+    prefs.end();
+}
+
+void EnergyBacklog::loadBatteryEnergyCheckpoint()
+{
+    BatteryEnergyRecord a{};
+    BatteryEnergyRecord b{};
+    const bool validA = readBatteryRecord(BATTERY_SLOT_A, a);
+    const bool validB = readBatteryRecord(BATTERY_SLOT_B, b);
+
+    const BatteryEnergyRecord *latest = nullptr;
+    if (validA && validB)
+    {
+        latest = (a.sequence >= b.sequence) ? &a : &b;
+    }
+    else if (validA)
+    {
+        latest = &a;
+    }
+    else if (validB)
+    {
+        latest = &b;
+    }
+
+    if (latest == nullptr)
+    {
+        _batteryChargeWh = 0.0;
+        _batteryDischargeWh = 0.0;
+        _batteryCheckpointSequence = 0;
+        _batteryDirty = false;
+        writeLog("[BatteryEnergy] No checkpoint; counters start at zero");
+        return;
+    }
+
+    _batteryChargeWh = static_cast<double>(latest->chargeMilliWh) / 1000.0;
+    _batteryDischargeWh = static_cast<double>(latest->dischargeMilliWh) / 1000.0;
+    _batteryCheckpointSequence = latest->sequence;
+    _batteryDirty = false;
+
+    writeLog("[BatteryEnergy] Restored charge=%.3f kWh discharge=%.3f kWh seq=%u",
+             _batteryChargeWh / 1000.0,
+             _batteryDischargeWh / 1000.0,
+             static_cast<unsigned>(_batteryCheckpointSequence));
+}
+
+bool EnergyBacklog::saveBatteryEnergyCheckpoint(bool force)
+{
+    if (!_ready || (!_batteryDirty && !force))
+    {
+        return !_batteryDirty;
+    }
+
+    BatteryEnergyRecord record{};
+    record.magic = BATTERY_RECORD_MAGIC;
+    record.sequence = _batteryCheckpointSequence + 1U;
+    record.chargeMilliWh = static_cast<uint64_t>(_batteryChargeWh * 1000.0 + 0.5);
+    record.dischargeMilliWh = static_cast<uint64_t>(_batteryDischargeWh * 1000.0 + 0.5);
+    record.version = BATTERY_RECORD_VERSION;
+    record.reserved = 0;
+    record.checksum = batteryRecordChecksum(record);
+
+    const char *path = (record.sequence & 1U) ? BATTERY_SLOT_A : BATTERY_SLOT_B;
+    File file = LittleFS.open(path, "w");
+    if (!file)
+    {
+        writeLog("[BatteryEnergy] Checkpoint open failed");
+        return false;
+    }
+
+    const size_t written = file.write(reinterpret_cast<const uint8_t *>(&record), sizeof(record));
+    file.flush();
+    file.close();
+
+    if (written != sizeof(record))
+    {
+        writeLog("[BatteryEnergy] Checkpoint write failed: %u/%u",
+                 static_cast<unsigned>(written),
+                 static_cast<unsigned>(sizeof(record)));
+        return false;
+    }
+
+    BatteryEnergyRecord verify{};
+    if (!readBatteryRecord(path, verify) || verify.sequence != record.sequence)
+    {
+        writeLog("[BatteryEnergy] Checkpoint verification failed");
+        return false;
+    }
+
+    _batteryCheckpointSequence = record.sequence;
+    _batteryLastCheckpointMs = millis();
+    _batteryDirty = false;
+    return true;
+}
+
+void EnergyBacklog::publishBatteryEnergyState(SolarState &state)
+{
+    JsonObject live = state.doc()["LiveData"].to<JsonObject>();
+    live[DESCR_Battery_Charge_Energy] = _batteryChargeWh / 1000.0;
+    live[DESCR_Battery_Discharge_Energy] = _batteryDischargeWh / 1000.0;
+    state.refreshBindings();
+}
+
+void EnergyBacklog::updateBatteryEnergy(SolarState &state,
+                                        bool inverterConnected,
+                                        unsigned long nowMs)
+{
+    publishBatteryEnergyState(state);
+
+    if (_batteryLastIntegrateMs == 0)
+    {
+        _batteryLastIntegrateMs = nowMs;
+        return;
+    }
+
+    const unsigned long elapsedMs = nowMs - _batteryLastIntegrateMs;
+    if (elapsedMs < BATTERY_INTEGRATE_INTERVAL_MS)
+    {
+        return;
+    }
+    _batteryLastIntegrateMs = nowMs;
+
+    JsonObject live = state.doc()["LiveData"].as<JsonObject>();
+    const JsonVariantConst voltageValue = live[DESCR_Battery_Voltage];
+    const JsonVariantConst chargeValue = live[DESCR_Battery_Charge_Current];
+    const JsonVariantConst dischargeValue = live[DESCR_Battery_Discharge_Current];
+    const JsonVariantConst netValue = live[DESCR_Battery_Load];
+
+    bool valid = inverterConnected && elapsedMs <= BATTERY_MAX_SAMPLE_GAP_MS && !voltageValue.isNull();
+    const double voltage = voltageValue.isNull() ? 0.0 : voltageValue.as<double>();
+
+    double netCurrent = 0.0;
+    if (!chargeValue.isNull() && !dischargeValue.isNull())
+    {
+        const double chargeCurrent = chargeValue.as<double>();
+        const double dischargeCurrent = dischargeValue.as<double>();
+        valid = valid &&
+                chargeCurrent >= 0.0 && chargeCurrent <= 1000.0 &&
+                dischargeCurrent >= 0.0 && dischargeCurrent <= 1000.0;
+        netCurrent = chargeCurrent - dischargeCurrent;
+    }
+    else if (!netValue.isNull())
+    {
+        netCurrent = netValue.as<double>();
+        valid = valid && netCurrent >= -1000.0 && netCurrent <= 1000.0;
+    }
+    else
+    {
+        valid = false;
+    }
+
+    valid = valid && voltage >= 5.0 && voltage <= 1000.0;
+
+    int8_t direction = 0;
+    if (valid && netCurrent > 0.01)
+    {
+        direction = 1;
+    }
+    else if (valid && netCurrent < -0.01)
+    {
+        direction = -1;
+    }
+
+    if (valid && direction != 0)
+    {
+        const double powerW = voltage * (direction > 0 ? netCurrent : -netCurrent);
+        const double energyWh = powerW * static_cast<double>(elapsedMs) / 3600000.0;
+
+        if (direction > 0)
+        {
+            _batteryChargeWh += energyWh;
+        }
+        else
+        {
+            _batteryDischargeWh += energyWh;
+        }
+        _batteryDirty = true;
+    }
+
+    const bool directionChanged = (_batteryDirection != direction);
+    const bool stoppedActiveFlow = (_batteryDirection != 0 && direction != _batteryDirection);
+    _batteryDirection = direction;
+
+    publishBatteryEnergyState(state);
+
+    if (_batteryDirty &&
+        (stoppedActiveFlow || (nowMs - _batteryLastCheckpointMs) >= BATTERY_CHECKPOINT_INTERVAL_MS))
+    {
+        saveBatteryEnergyCheckpoint(false);
+    }
+
+    if (directionChanged)
+    {
+        writeLog("[BatteryEnergy] direction=%d charge=%.6f kWh discharge=%.6f kWh",
+                 static_cast<int>(direction),
+                 _batteryChargeWh / 1000.0,
+                 _batteryDischargeWh / 1000.0);
+    }
+}
+
+void EnergyBacklog::flushBatteryEnergy()
+{
+    saveBatteryEnergyCheckpoint(false);
 }
 
 bool EnergyBacklog::startReplay()
