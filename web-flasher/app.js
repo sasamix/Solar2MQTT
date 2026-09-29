@@ -89,7 +89,7 @@ function setManifest(board){
     builds:[{chipFamily:board.chip,parts:[{path:firmwareUrl,offset:0}]}]
   };
   manifestUrl=URL.createObjectURL(new Blob([JSON.stringify(manifest)],{type:"application/json"}));
-  installButton.manifest=manifestUrl;
+  installButton.setAttribute("manifest",manifestUrl);
 }
 
 function refreshBoard(){
