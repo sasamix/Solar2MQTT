@@ -1,5 +1,7 @@
 name: Build Other ESP32 Targets
 
+# Compile every supported non-ATOM ESP32 target against the shared firmware source.
+
 on:
   push:
     branches: [ main ]
