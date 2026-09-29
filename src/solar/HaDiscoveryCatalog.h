@@ -115,6 +115,8 @@ static const HaEntityDescriptor HA_LIVE_DESCRIPTORS[] = {
     {DESCR_Battery_Average_Current, "battery-outline", "A", "current", "measurement"},
     {DESCR_Battery_Average_Power, "battery-outline", "W", "power", "measurement"},
     {DESCR_Battery_Charging_Power, "battery-charging-high", "W", "power", "measurement"},
+    {DESCR_Battery_Charging_Power_Calculated, "battery-charging-high", "W", "power", "measurement", "Battery Charging Power", "sensor.battery_charging_power"},
+    {DESCR_Battery_Discharging_Power_Calculated, "battery-minus-outline", "W", "power", "measurement", "Battery Discharging Power", "sensor.battery_discharging_power"},
     {DESCR_Battery_Charge_Energy, "battery-plus", "kWh", "energy", "total_increasing", "Зарядка батареи", "sensor.battery_total_charge_energy"},
     {DESCR_Battery_Discharge_Energy, "battery-minus", "kWh", "energy", "total_increasing", "Разрядка батареи", "sensor.battery_total_discharge_energy"},
     {DESCR_Battery_Discharge_Current, "battery-minus-outline", "A", "current", "measurement"},
