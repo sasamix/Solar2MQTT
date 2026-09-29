@@ -49,6 +49,10 @@ private:
     bool _configured;
     bool _lastConnected;
     bool _replayingEnergyBacklog;
+    bool _haDiscoverySweepActive;
+    bool _haDiscoverySweepPowMr;
+    unsigned long _haDiscoverySweepStartedMs;
+    String _haDiscoverySweepTopic;
     unsigned long _lastReconnectAttempt;
     unsigned long _lastAlivePublish;
     unsigned long _lastStatePublish;
@@ -79,6 +83,8 @@ private:
     void publishHaDs18b20(JsonDocument &snapshot, JsonObjectConst liveValues, std::vector<String> &currentTopics, bool force);
     void publishHaPowMrSettings(JsonDocument &snapshot, JsonObjectConst deviceValues, std::vector<String> &currentTopics, bool force);
     bool hasHaDiscoveryTopic(const String &topic) const;
+    void startHaDiscoverySweep();
+    void stopHaDiscoverySweep();
     void setupSubscriptions();
     String baseTopic() const;
 };
