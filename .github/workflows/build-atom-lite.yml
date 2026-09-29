@@ -48,7 +48,7 @@ jobs:
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
             --title "Solar2MQTT ${FW_VERSION}" \
             --target "${{ github.sha }}" \
-            --notes "ATOM Lite: based on the proven 2.0.14W Wi-Fi/runtime baseline. Only the PowMr diagnostic watch was expanded to cover 4501-4534 and 4553-4564 for SOC/BMS correlation."
+            --notes-file release.md
           gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin.ota" -y 2>/dev/null || true
           gh release delete-asset "$TAG" "Solar2MQTT_m5stack_atom_lite_V${FW_VERSION}.bin" -y 2>/dev/null || true
           gh release upload "$TAG" \
