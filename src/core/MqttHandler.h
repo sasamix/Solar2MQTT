@@ -27,6 +27,7 @@ public:
     void triggerFullStatePublish();
     void triggerHaDiscovery();
     void publishSensorImmediate(uint8_t index, float temperature);
+    void flushPersistentEnergy();
 
 private:
     static MqttHandler *s_instance;
