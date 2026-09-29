@@ -1,0 +1,123 @@
+name: Deploy Solar2MQTT Web Flasher
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'platformio.ini'
+      - 'src/**'
+      - 'include/**'
+      - 'tools/**'
+      - 'partitions/**'
+      - 'web-flasher/**'
+      - '.github/workflows/deploy-web-flasher.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: solar2mqtt-pages
+  cancel-in-progress: true
+
+jobs:
+  build-firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - m5stack_atom_lite
+          - wemos_d1_mini32
+          - esp32c3_supermini
+          - esp32s3_supermini
+          - waveshare_esp32_s3_eth
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Read firmware version
+        run: |
+          VER="$(awk -F' = ' '/^custom_source_version =/{print $2; exit}' platformio.ini)"
+          test -n "$VER"
+          echo "FW_VERSION=$VER" >> "$GITHUB_ENV"
+          echo "Firmware version: $VER"
+
+      - name: Build ${{ matrix.env }}
+        run: pio run -e "${{ matrix.env }}"
+
+      - name: Stage full flash image
+        run: |
+          mkdir -p bundle
+          SOURCE=".firmware/Solar2MQTT_${{ matrix.env }}_V${FW_VERSION}.bin"
+          test -s "$SOURCE"
+          cp "$SOURCE" "bundle/${{ matrix.env }}.bin"
+          ls -lh bundle/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-flasher-${{ matrix.env }}
+          path: bundle/${{ matrix.env }}.bin
+          if-no-files-found: error
+          retention-days: 7
+
+  build-site:
+    runs-on: ubuntu-latest
+    needs: build-firmware
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read firmware version
+        run: |
+          VER="$(awk -F' = ' '/^custom_source_version =/{print $2; exit}' platformio.ini)"
+          test -n "$VER"
+          echo "FW_VERSION=$VER" >> "$GITHUB_ENV"
+
+      - name: Download firmware images
+        uses: actions/download-artifact@v4
+        with:
+          pattern: web-flasher-*
+          path: site/firmware
+          merge-multiple: true
+
+      - name: Build static site
+        run: |
+          cp -a web-flasher/. site/
+          printf '{\n  "version": "%s",\n  "commit": "%s"\n}\n' "$FW_VERSION" "$GITHUB_SHA" > site/version.json
+          touch site/.nojekyll
+          test -s site/firmware/m5stack_atom_lite.bin
+          test -s site/firmware/wemos_d1_mini32.bin
+          test -s site/firmware/esp32c3_supermini.bin
+          test -s site/firmware/esp32s3_supermini.bin
+          test -s site/firmware/waveshare_esp32_s3_eth.bin
+          find site -maxdepth 2 -type f -printf '%p %k KB\n' | sort
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-site
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

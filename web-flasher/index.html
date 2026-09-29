@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>Solar2MQTT Web Flasher</title>
+  <meta name="description" content="Install Solar2MQTT firmware directly from your browser.">
+  <link rel="icon" href="./logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="https://github.com/sasamix/Solar2MQTT" target="_blank" rel="noopener">
+        <img src="./logo.svg" alt="Solar2MQTT">
+        <div>
+          <strong>Solar2MQTT</strong>
+          <span data-i18n="subtitle">Web‑прошивка ESP32</span>
+        </div>
+      </a>
+      <div class="language" role="group" aria-label="Language">
+        <button type="button" data-lang="ru" class="active">RU</button>
+        <button type="button" data-lang="en">EN</button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="eyebrow" data-i18n="eyebrow">Browser Flasher</div>
+      <h1 data-i18n="title">Прошивка Solar2MQTT через браузер</h1>
+      <p data-i18n="intro">Подключите плату по USB, выберите точную модель и запустите установку. Никаких отдельных программ‑флешеров и ручного ввода адресов памяти.</p>
+      <div class="status-row">
+        <div class="status-pill"><span data-i18n="versionLabel">Версия</span><strong id="version">…</strong></div>
+        <div class="status-pill"><span data-i18n="browserLabel">Web Serial</span><strong id="browser-status">…</strong></div>
+      </div>
+    </section>
+
+    <section class="steps">
+      <article><span>1</span><div><strong data-i18n="step1Title">Выберите плату</strong><p data-i18n="step1Text">Нужна точная аппаратная версия — семейства ESP недостаточно.</p></div></article>
+      <article><span>2</span><div><strong data-i18n="step2Title">Подключите USB</strong><p data-i18n="step2Text">При необходимости переведите плату в режим загрузчика.</p></div></article>
+      <article><span>3</span><div><strong data-i18n="step3Title">Нажмите Connect</strong><p data-i18n="step3Text">Выберите COM‑порт и дождитесь завершения прошивки.</p></div></article>
+    </section>
+
+    <section class="installer card">
+      <div class="section-head">
+        <div><div class="eyebrow" data-i18n="installerEyebrow">Installer</div><h2 data-i18n="installerTitle">Выберите целевую плату</h2></div>
+      </div>
+
+      <label class="field">
+        <span data-i18n="boardLabel">Плата</span>
+        <select id="board">
+          <option value="" data-i18n="boardPlaceholder">— Выберите плату —</option>
+          <option value="m5stack_atom_lite">M5Stack ATOM Lite + ATOMIC RS232</option>
+          <option value="wemos_d1_mini32">Wemos D1 Mini32</option>
+          <option value="esp32c3_supermini">ESP32‑C3 SuperMini</option>
+          <option value="esp32s3_supermini">ESP32‑S3 SuperMini</option>
+          <option value="waveshare_esp32_s3_eth">Waveshare ESP32‑S3 Ethernet</option>
+        </select>
+      </label>
+
+      <div id="board-info" class="board-info hidden">
+        <div><span data-i18n="selectedBoard">Плата</span><strong id="selected-board">—</strong></div>
+        <div><span data-i18n="chipLabel">Чип</span><strong id="selected-chip">—</strong></div>
+        <div><span data-i18n="imageLabel">Образ</span><strong id="selected-image">—</strong></div>
+      </div>
+
+      <div class="warning">
+        <strong data-i18n="warningTitle">Полная установка</strong>
+        <p data-i18n="warningText">Записывается полный flash‑образ с таблицей разделов и LittleFS backlog. Wi‑Fi/MQTT и другие сохранённые настройки будут сброшены. Для обычного обновления уже настроенного устройства используйте OTA в Web UI Solar2MQTT.</p>
+      </div>
+
+      <label class="confirm">
+        <input id="confirm-board" type="checkbox" disabled>
+        <span data-i18n="confirmText">Я выбрал точную модель платы и понимаю, что это полная прошивка.</span>
+      </label>
+
+      <div id="install-area" class="install-area hidden">
+        <esp-web-install-button id="install-button">
+          <span slot="unsupported" data-i18n="unsupported">Web Serial недоступен. Откройте страницу в актуальном Chrome или Edge на компьютере.</span>
+        </esp-web-install-button>
+      </div>
+
+      <p id="select-hint" class="hint" data-i18n="selectHint">Сначала выберите плату.</p>
+    </section>
+
+    <section class="notes card">
+      <h2 data-i18n="notesTitle">Что прошивается</h2>
+      <p data-i18n="notesText">Флешер использует тот же код и те же PlatformIO‑окружения, что и основной CI Solar2MQTT. Для каждой платы собирается отдельный полный образ. ESP Web Tools дополнительно проверяет семейство подключённого чипа.</p>
+      <div class="links">
+        <a href="https://github.com/sasamix/Solar2MQTT" target="_blank" rel="noopener" data-i18n="repoLink">GitHub репозиторий</a>
+        <a href="https://github.com/sasamix/Solar2MQTT/releases/latest" target="_blank" rel="noopener" data-i18n="releaseLink">Последний Release</a>
+      </div>
+    </section>
+
+    <footer><span>Solar2MQTT Web Flasher</span><span>ESP Web Tools</span></footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
