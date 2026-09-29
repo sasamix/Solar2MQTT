@@ -217,12 +217,14 @@ MqttHandler::MqttHandler(SolarState &state, WiFiManager &wifiManager, SolarInver
       _inverterService(inverterService),
       _netClient(&_plainClient),
       _mqtt(_plainClient),
+      _energyBacklog(),
       _pendingFullPublish(false),
       _pendingHaDiscovery(false),
       _forceHaDiscovery(false),
       _pendingLegacyDs18Cleanup(true),
       _configured(false),
       _lastConnected(false),
+      _replayingEnergyBacklog(false),
       _lastReconnectAttempt(0),
       _lastAlivePublish(0),
       _lastStatePublish(0)
@@ -242,6 +244,8 @@ void MqttHandler::begin()
     _forceHaDiscovery = false;
     _pendingLegacyDs18Cleanup = true;
     _haDiscoveryTopics.clear();
+    _replayingEnergyBacklog = false;
+    _energyBacklog.begin();
 }
 
 void MqttHandler::reconfigure()
@@ -261,35 +265,96 @@ void MqttHandler::reconfigure()
     _lastAlivePublish = millis();
     _lastStatePublish = millis();
     _haDiscoveryTopics.clear();
+    _replayingEnergyBacklog = false;
+    _energyBacklog.cancelReplay();
 }
 
 void MqttHandler::loop()
 {
-    if (!_configured || !_wifiManager.getConnectionState())
+    const unsigned long now = millis();
+    bool connected = false;
+
+    if (_configured && _wifiManager.getConnectionState())
     {
+        connected = ensureConnected();
+        if (connected)
+        {
+            _mqtt.loop();
+        }
+    }
+
+    // Keep the cumulative PV/grid energy counters in LittleFS while MQTT is
+    // unavailable. Inverter polling continues independently from MQTT.
+    _energyBacklog.captureIfNeeded(_state, _configured && !connected, now);
+
+    if (!_configured)
+    {
+        _replayingEnergyBacklog = false;
+        _energyBacklog.cancelReplay();
+        _lastConnected = false;
         return;
     }
 
-    const bool connected = ensureConnected();
-    if (connected)
+    if (!connected)
     {
-        _mqtt.loop();
+        if (_lastConnected || _replayingEnergyBacklog)
+        {
+            _energyBacklog.cancelReplay();
+        }
+        _replayingEnergyBacklog = false;
+        _lastConnected = false;
+        return;
     }
 
-    const unsigned long now = millis();
-    if (connected && (now - _lastAlivePublish) >= 30000UL)
+    if (!_lastConnected)
+    {
+        _replayingEnergyBacklog = _energyBacklog.startReplay();
+    }
+
+    if (_replayingEnergyBacklog)
+    {
+        const EnergyBacklog::ReplayResult replay =
+            _energyBacklog.replayBatch(_mqtt, baseTopic(), 2);
+
+        if (replay == EnergyBacklog::ReplayResult::InProgress)
+        {
+            _lastConnected = true;
+            return;
+        }
+
+        _replayingEnergyBacklog = false;
+
+        if (replay == EnergyBacklog::ReplayResult::Complete)
+        {
+            // Historical counter states have been replayed. Publish the live
+            // snapshot immediately afterwards so retained topics finish on
+            // the current values.
+            _pendingFullPublish = true;
+        }
+        else if (replay == EnergyBacklog::ReplayResult::Failed)
+        {
+            // Keep the file intact and force a normal MQTT reconnect before
+            // trying the backlog again.
+            writeLog("[EnergyBacklog] Replay interrupted; MQTT reconnect scheduled");
+            _mqtt.disconnect();
+            _lastConnected = false;
+            return;
+        }
+    }
+
+    if ((now - _lastAlivePublish) >= 30000UL)
     {
         _lastAlivePublish = now;
         publishAlive();
     }
 
     const uint32_t intervalMs = statePublishIntervalMs();
-    if (connected && intervalMs > 0 && (now - _lastStatePublish) >= intervalMs)
+    if (intervalMs > 0 && (now - _lastStatePublish) >= intervalMs)
     {
         _pendingFullPublish = true;
     }
 
-    if (connected && _pendingFullPublish)
+    if (_pendingFullPublish)
     {
         _pendingFullPublish = false;
         publishState();
@@ -301,7 +366,7 @@ void MqttHandler::loop()
         }
     }
 
-    if (connected && _pendingHaDiscovery)
+    if (_pendingHaDiscovery)
     {
         const bool force = _forceHaDiscovery;
         _pendingHaDiscovery = false;
@@ -309,7 +374,7 @@ void MqttHandler::loop()
         publishHaDiscovery(force);
     }
 
-    _lastConnected = connected;
+    _lastConnected = true;
 }
 
 bool MqttHandler::isConnected()
