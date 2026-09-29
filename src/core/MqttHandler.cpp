@@ -812,6 +812,7 @@ void MqttHandler::publishHaEspInternalTemperature(JsonDocument &snapshot,
     doc["icon"] = "mdi:thermometer-lines";
     doc["unit_of_measurement"] = HA_UNIT_CELSIUS;
     doc["device_class"] = "temperature";
+    doc["state_class"] = "measurement";
     doc["force_update"] = true;
     doc["qos"] = 1;
 
@@ -855,6 +856,7 @@ void MqttHandler::publishHaDs18b20(JsonDocument &snapshot, JsonObjectConst liveV
         doc["icon"] = "mdi:thermometer-lines";
         doc["unit_of_measurement"] = HA_UNIT_CELSIUS;
         doc["device_class"] = "temperature";
+        doc["state_class"] = "measurement";
         doc["force_update"] = true;
         doc["qos"] = 1;
 
