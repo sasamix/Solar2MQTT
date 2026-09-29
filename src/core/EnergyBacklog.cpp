@@ -341,33 +341,86 @@ bool EnergyBacklog::compactIfNeeded(size_t incomingBytes)
 
 bool EnergyBacklog::repairTrailingPartialRecord()
 {
-    File file = LittleFS.open(BACKLOG_FILE, "r+");
-    if (!file)
+    File source = LittleFS.open(BACKLOG_FILE, "r");
+    if (!source)
     {
         return true;
     }
 
     const size_t recordSize = sizeof(EnergyRecord);
-    const size_t currentSize = file.size();
+    const size_t currentSize = source.size();
     const size_t alignedSize = currentSize - (currentSize % recordSize);
 
-    bool ok = true;
-    if (alignedSize != currentSize)
+    if (alignedSize == currentSize)
     {
-        ok = file.truncate(alignedSize);
-        if (ok)
-        {
-            writeLog("[EnergyBacklog] Removed %u-byte partial tail",
-                     static_cast<unsigned>(currentSize - alignedSize));
-        }
-        else
-        {
-            writeLog("[EnergyBacklog] Failed to repair partial backlog tail");
-        }
+        source.close();
+        return true;
     }
 
-    file.close();
-    return ok;
+    // This Arduino-ESP32 FS implementation does not expose File::truncate().
+    // Recover from a torn final write by rebuilding only the newest aligned
+    // records into the temporary file. Keeping at most KEEP_BACKLOG_BYTES also
+    // guarantees enough free space for the recovery copy.
+    size_t keepBytes = KEEP_BACKLOG_BYTES - (KEEP_BACKLOG_BYTES % recordSize);
+    if (keepBytes > alignedSize)
+    {
+        keepBytes = alignedSize;
+    }
+
+    const size_t startOffset = alignedSize - keepBytes;
+    if (!source.seek(startOffset, SeekSet))
+    {
+        source.close();
+        writeLog("[EnergyBacklog] Partial-tail recovery seek failed");
+        return false;
+    }
+
+    LittleFS.remove(BACKLOG_TEMP_FILE);
+    File target = LittleFS.open(BACKLOG_TEMP_FILE, "w");
+    if (!target)
+    {
+        source.close();
+        writeLog("[EnergyBacklog] Partial-tail recovery temp open failed");
+        return false;
+    }
+
+    uint8_t buffer[512];
+    size_t remaining = keepBytes;
+    bool ok = true;
+
+    while (remaining > 0)
+    {
+        const size_t chunk = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+        const size_t read = source.read(buffer, chunk);
+        if (read != chunk || target.write(buffer, read) != read)
+        {
+            ok = false;
+            break;
+        }
+        remaining -= read;
+    }
+
+    target.flush();
+    target.close();
+    source.close();
+
+    if (!ok)
+    {
+        LittleFS.remove(BACKLOG_TEMP_FILE);
+        writeLog("[EnergyBacklog] Partial-tail recovery copy failed");
+        return false;
+    }
+
+    LittleFS.remove(BACKLOG_FILE);
+    if (!LittleFS.rename(BACKLOG_TEMP_FILE, BACKLOG_FILE))
+    {
+        writeLog("[EnergyBacklog] Partial-tail recovery rename failed");
+        return false;
+    }
+
+    writeLog("[EnergyBacklog] Recovered torn write; dropped %u trailing bytes",
+             static_cast<unsigned>(currentSize - alignedSize));
+    return true;
 }
 
 bool EnergyBacklog::startReplay()
