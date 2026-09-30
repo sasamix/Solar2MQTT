@@ -193,6 +193,8 @@
       "Save changes": "Сохранить изменения",
       "Only known parameters are shown. Saving writes only changed fields; every write is verified by reading the register back.": "Показываются только известные параметры. При сохранении записываются только изменённые поля; каждая запись проверяется чтением регистра обратно.",
       "This page is available only when MODBUS_POWMR is the active protocol.": "Эта страница доступна только при активном протоколе MODBUS_POWMR.",
+      "This page is available only when MODBUS_POWMR or MODBUS_POWMR_PI is the active protocol.": "Эта страница доступна только при активном протоколе MODBUS_POWMR или MODBUS_POWMR_PI.",
+      "Manual selection skips protocol detection. PI+Modbus is never auto-detected and must only be selected for a PowMr that supports both interfaces on the same UART.": "Ручной выбор отключает автоопределение. PI+Modbus никогда не выбирается автоматически и предназначен только для PowMr, который поддерживает Modbus и PI30 на одном UART.",
       "Values loaded from inverter.": "Значения загружены из инвертора.",
       "No changes.": "Изменений нет.",
       "Saved:": "Сохранено:",

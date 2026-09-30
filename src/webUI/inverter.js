@@ -73,8 +73,8 @@
 
   async function loadValues() {
     const status = await fetchJson("/api/status");
-    if (status.protocol !== "MODBUS_POWMR") {
-      throw new Error("This page is available only when MODBUS_POWMR is the active protocol.");
+    if (!["MODBUS_POWMR", "MODBUS_POWMR_PI"].includes(status.protocol)) {
+      throw new Error("This page is available only when MODBUS_POWMR or MODBUS_POWMR_PI is the active protocol.");
     }
 
     const data = await fetchJson("/api/data");
