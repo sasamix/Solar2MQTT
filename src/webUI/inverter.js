@@ -23,6 +23,21 @@
     ["invEqInterval", "Battery_Equalization_Interval", "setting:equalizationinterval"],
   ];
 
+  const piSwitches = [
+    ["invEqEnabled", "Battery_Equalization_Enabled", "powmr pi PBEQE1", "powmr pi PBEQE0"],
+    ["invBuzzer", "Buzzer_Enabled", "powmr pi PEa", "powmr pi PDa"],
+    ["invOverloadBypass", "Overload_Bypass_Enabled", "powmr pi PEb", "powmr pi PDb"],
+    ["invPowerSaving", "Power_Saving_Enabled", "powmr pi PEj", "powmr pi PDj"],
+    ["invLcdReset", "LCD_Reset_To_Default_Enabled", "powmr pi PEk", "powmr pi PDk"],
+    ["invDataLogPopup", "Data_Log_Pop_Up", "powmr pi PEl", "powmr pi PDl"],
+    ["invFeedToGrid", "Solar_Feed_To_Grid_Enabled", "powmr pi PEd", "powmr pi PDd"],
+    ["invOverloadRestart", "Overload_Restart_Enabled", "powmr pi PEu", "powmr pi PDu"],
+    ["invOverTempRestart", "Over_Temperature_Restart_Enabled", "powmr pi PEv", "powmr pi PDv"],
+    ["invLcdBacklight", "LCD_Backlight_Enabled", "powmr pi PEx", "powmr pi PDx"],
+    ["invPrimaryAlarm", "Primary_Source_Interrupt_Alarm_Enabled", "powmr pi PEy", "powmr pi PDy"],
+    ["invRecordFault", "Record_Fault_Code_Enabled", "powmr pi PEz", "powmr pi PDz"],
+  ];
+
   const normalize = (id, value) => {
     const text = value == null ? "" : String(value);
     if (id === "invOutputMode") {
@@ -48,8 +63,14 @@
     return text;
   };
 
+  const toBool = (value) => {
+    if (value === true) return true;
+    const text = String(value ?? "").trim().toLowerCase();
+    return text === "1" || text === "true" || text === "on" || text === "enabled";
+  };
+
   const findValue = (data, key) => {
-    const containers = [data?.DeviceData, data?.StaticData, data?.Settings, data];
+    const containers = [data?.DeviceData, data?.StaticData, data?.Settings, data?.LiveData, data];
     for (const container of containers) {
       if (container && Object.prototype.hasOwnProperty.call(container, key)) return container[key];
     }
@@ -77,6 +98,14 @@
       throw new Error("This page is available only when MODBUS_POWMR or MODBUS_POWMR_PI is the active protocol.");
     }
 
+    const hybridPi = status.protocol === "MODBUS_POWMR_PI";
+    const note = byId("invPiSettingsNote");
+    if (note) {
+      note.textContent = hybridPi
+        ? "PI+Modbus settings are available."
+        : "These switches require PI+Modbus mode.";
+    }
+
     const data = await fetchJson("/api/data");
     for (const [id, key] of fields) {
       const el = byId(id);
@@ -87,6 +116,27 @@
       el.value = value;
       initial.set(id, String(el.value));
     }
+
+    for (const [id, key] of piSwitches) {
+      const el = byId(id);
+      if (!el) continue;
+      const raw = findValue(data, key);
+      const available = hybridPi && raw != null;
+      el.disabled = !available;
+      if (available) {
+        el.checked = toBool(raw);
+        initial.set(id, String(el.checked));
+      } else {
+        initial.delete(id);
+      }
+    }
+
+    const active = data?.LiveData?.Battery_Equalization_Active;
+    const activeEl = byId("invEqActive");
+    if (activeEl) {
+      activeEl.textContent = active == null ? "-" : (toBool(active) ? "ON" : "OFF");
+    }
+
     setResult("Values loaded from inverter.");
   }
 
@@ -98,7 +148,7 @@
     if (Number.isFinite(an) && Number.isFinite(en)) {
       return Math.abs(an - en) < 0.001;
     }
-    return String(a) === String(e);
+    return String(a).toLowerCase() === String(e).toLowerCase();
   };
 
   async function waitForValue(id, key, expected, timeoutMs = 8000) {
@@ -109,12 +159,12 @@
       const raw = findValue(data, key);
       if (raw != null) {
         last = normalize(id, raw);
-        if (valuesMatch(id, last, expected)) return { matched: true, value: last };
+        if (valuesMatch(id, last, expected)) return { matched: true, value: raw };
       }
       await sleep(300);
     }
     return { matched: false, value: last };
-  };
+  }
 
   async function sendCommand(command) {
     const before = await fetchJson("/api/data");
@@ -134,8 +184,9 @@
     }
 
     if (!latest) throw new Error(`No answer for command: ${command}`);
-    if (!latest.startsWith("OK:")) throw new Error(latest);
-    return latest;
+    if (latest.startsWith("OK:")) return latest;
+    if (latest === "ACK") return `OK: ${command} (ACK)`;
+    throw new Error(latest);
   }
 
   async function saveChanges(event) {
@@ -146,12 +197,27 @@
     const log = [];
     try {
       const changed = [];
+
       for (const [id, key, action] of fields) {
         const el = byId(id);
         if (!el) continue;
         const current = String(el.value);
         if (initial.get(id) === current) continue;
-        changed.push({ id, key, action, value: current });
+        changed.push({ type: "value", id, key, action, value: current });
+      }
+
+      for (const [id, key, onCommand, offCommand] of piSwitches) {
+        const el = byId(id);
+        if (!el || el.disabled || !initial.has(id)) continue;
+        const current = String(el.checked);
+        if (initial.get(id) === current) continue;
+        changed.push({
+          type: "switch",
+          id,
+          key,
+          value: el.checked,
+          command: el.checked ? onCommand : offCommand,
+        });
       }
 
       if (!changed.length) {
@@ -160,35 +226,38 @@
       }
 
       for (const item of changed) {
-        let command;
-        if (item.action === "outputmode") command = `powmr outputmode ${item.value}`;
-        else if (item.action === "batterytype") command = `powmr batterytype ${item.value}`;
-        else {
-          const name = item.action.substring("setting:".length);
-          command = `powmr setting ${name} ${item.value}`;
+        let command = item.command;
+        if (item.type === "value") {
+          if (item.action === "outputmode") command = `powmr outputmode ${item.value}`;
+          else if (item.action === "batterytype") command = `powmr batterytype ${item.value}`;
+          else {
+            const name = item.action.substring("setting:".length);
+            command = `powmr setting ${name} ${item.value}`;
+          }
         }
 
         const answer = await sendCommand(command);
         log.push(answer);
 
         const confirmed = await waitForValue(item.id, item.key, item.value);
+        const el = byId(item.id);
         if (confirmed.matched) {
-          const el = byId(item.id);
-          if (el) el.value = confirmed.value;
-          initial.set(item.id, String(confirmed.value));
+          if (el) {
+            if (item.type === "switch") el.checked = toBool(confirmed.value);
+            else el.value = normalize(item.id, confirmed.value);
+          }
+          initial.set(item.id, item.type === "switch"
+            ? String(el?.checked ?? item.value)
+            : String(el?.value ?? item.value));
         } else {
-          // The inverter acknowledged the write, but the next Modbus static
-          // refresh has not reached /api/data yet. Keep the requested value
-          // visible instead of overwriting it with stale cached DeviceData.
+          // Keep the requested value visible when the inverter has accepted
+          // the command but the next PI/Modbus refresh has not reached /api/data.
           initial.set(item.id, String(item.value));
           log.push(`Waiting for refreshed value: ${item.key}`);
         }
       }
 
       setResult("Saved:\n" + log.join("\n"));
-      // Do not immediately call loadValues() here: it can still contain the
-      // pre-write DeviceData value and would visually revert a successful save.
-      // waitForValue() above updates each field only after /api/data confirms it.
     } catch (error) {
       log.push("ERROR: " + error.message);
       setResult(log.join("\n"), true);
