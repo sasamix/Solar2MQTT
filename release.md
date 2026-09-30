@@ -1,5 +1,12 @@
 Release Notes
 
+- 2.0.18N adds explicit battery equalization control for the PowMr PI+Modbus mode.
+- `QBEQI` is polled in hybrid mode; Home Assistant receives «Выравнивание АКБ» as a configuration switch and «Выравнивание АКБ активно» as the current equalization activity state.
+- The switch uses the PI30 commands `PBEQE1` / `PBEQE0` and refreshes `QBEQI` after a write.
+- PowMr 50xx setting writes are now verified through the readable 45xx mirror registers instead of reading the control register back directly. For example, equalization voltage writes to 5030 are verified through 4549.
+- Mirror readback is retried; if the write was acknowledged but immediate mirror verification is unavailable, the UI reports a successful accepted write with pending refresh instead of a false write error.
+- Output-source priority and battery-type verification use the same mirrored-register path.
+
 - 2.0.18M completes the explicit PowMr PI+Modbus protocol integration in the Web UI.
 - The PowMr settings page now accepts both `MODBUS_POWMR` and `MODBUS_POWMR_PI`.
 - Existing `MODBUS_POWMR`, PI30/PI41 and other protocols remain unchanged.
