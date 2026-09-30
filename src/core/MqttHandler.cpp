@@ -87,6 +87,7 @@ bool isPowMrWritableSettingKey(const char *key)
         "Battery_Equalization_Time",
         "Battery_Equalization_Timeout",
         "Battery_Equalization_Interval",
+        DESCR_Battery_Equalization_Enabled,
         DESCR_Buzzer_Enabled,
         DESCR_Overload_Bypass_Enabled,
         DESCR_Power_Saving_Enabled,
@@ -205,6 +206,7 @@ bool isApprovedHaDiscoveryKey(const char *component, const char *key, bool powMr
     if (strcmp(component, "switch") == 0)
     {
         const char *const switchKeys[] = {
+            DESCR_Battery_Equalization_Enabled,
             DESCR_Buzzer_Enabled,
             DESCR_Overload_Bypass_Enabled,
             DESCR_Power_Saving_Enabled,
@@ -1483,6 +1485,51 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
         appendTopicIfMissing(_haDiscoveryTopics, topic);
     };
 
+    auto publishCommandSwitch = [&](const char *key,
+                                     const char *name,
+                                     const char *payloadOn,
+                                     const char *payloadOff)
+    {
+        JsonVariantConst state = deviceValues[key];
+        if (!state.is<bool>())
+        {
+            return;
+        }
+
+        const String topic = buildDiscoveryTopic(deviceId, "switch", key);
+        appendTopicIfMissing(currentTopics, topic);
+        if (!force && hasHaDiscoveryTopic(topic))
+        {
+            return;
+        }
+
+        purgeHaDiscoveryComponent(_mqtt, deviceId, "sensor", key);
+        purgeHaDiscoveryComponent(_mqtt, deviceId, "binary_sensor", key);
+
+        JsonDocument doc;
+        doc["name"] = name;
+        doc["state_topic"] = topicBase + "/DeviceData/" + key;
+        doc["command_topic"] = commandTopic;
+        doc["payload_on"] = payloadOn;
+        doc["payload_off"] = payloadOff;
+        doc["state_on"] = "true";
+        doc["state_off"] = "false";
+        doc["availability_topic"] = availabilityTopic;
+        doc["payload_available"] = "true";
+        doc["payload_not_available"] = "false";
+        doc["unique_id"] = buildUniqueId(deviceId, "PowMrPiSetting", key);
+        doc["icon"] = "mdi:battery-sync-outline";
+        doc["entity_category"] = "config";
+        doc["qos"] = 1;
+
+        populateDeviceInfo(doc, snapshot);
+
+        String payload;
+        serializeJson(doc, payload);
+        _mqtt.publish(topic.c_str(), payload.c_str(), true);
+        appendTopicIfMissing(_haDiscoveryTopics, topic);
+    };
+
     publishSelect(DESCR_Output_Source_Priority,
                   "Режим питания нагрузки",
                   {"UTI — сначала сеть", "SUB — солнце → сеть → батарея", "SBU — солнце → батарея → сеть"},
@@ -1522,6 +1569,7 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
     publishNumber("Battery_Equalization_Interval", "Интервал выравнивания АКБ", "equalizationinterval", 0, 999, 1, "d");
 
     const char *const piSwitchKeys[] = {
+        DESCR_Battery_Equalization_Enabled,
         DESCR_Buzzer_Enabled,
         DESCR_Overload_Bypass_Enabled,
         DESCR_Power_Saving_Enabled,
@@ -1537,6 +1585,10 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
 
     if (hybridPi)
     {
+        publishCommandSwitch(DESCR_Battery_Equalization_Enabled,
+                             "Выравнивание АКБ",
+                             "powmr pi PBEQE1",
+                             "powmr pi PBEQE0");
         publishSwitch(DESCR_Buzzer_Enabled, "Зуммер", 'a');
         publishSwitch(DESCR_Overload_Bypass_Enabled, "Байпас при перегрузке", 'b');
         publishSwitch(DESCR_Power_Saving_Enabled, "Режим энергосбережения", 'j');
