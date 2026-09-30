@@ -950,6 +950,24 @@ void WebServerHandler::registerRoutes()
     _server.on("/update_firmware", HTTP_POST, finishUpdate, uploadUpdate);
     _server.on("/update", HTTP_POST, finishUpdate, uploadUpdate);
 
+    _server.on("/api/system/partitions", HTTP_GET, [this](AsyncWebServerRequest *request)
+               {
+        if (!isAuthorized(request))
+        {
+            return request->requestAuthentication();
+        }
+
+        uint32_t firmwareSize = 0;
+        if (request->hasParam("firmwareSize"))
+        {
+            firmwareSize = static_cast<uint32_t>(request->getParam("firmwareSize")->value().toInt());
+        }
+
+        AsyncWebServerResponse *response =
+            request->beginResponse(200, "application/json", _otaUpdater.diagnosticsJson(firmwareSize));
+        response->addHeader("Cache-Control", "no-store");
+        request->send(response); });
+
     _server.on("/ota/status", HTTP_GET, [this](AsyncWebServerRequest *request)
                {
         if (!isAuthorized(request))
