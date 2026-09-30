@@ -1,6 +1,7 @@
 const BOARDS = {
   m5stack_atom_lite:{name:"M5Stack ATOM Lite + ATOMIC RS232",chip:"ESP32",file:"m5stack_atom_lite.bin"},
   wemos_d1_mini32:{name:"Wemos D1 Mini32",chip:"ESP32",file:"wemos_d1_mini32.bin"},
+  wemos_d1_mini_esp8266:{name:"Wemos D1 mini (ESP8266)",chip:"ESP8266",file:"wemos_d1_mini_esp8266.bin",versionFile:"wemos_d1_mini_esp8266.version"},
   esp32c3_supermini:{name:"ESP32-C3 SuperMini",chip:"ESP32-C3",file:"esp32c3_supermini.bin"},
   esp32s3_supermini:{name:"ESP32-S3 SuperMini",chip:"ESP32-S3",file:"esp32s3_supermini.bin"},
   waveshare_esp32_s3_eth:{name:"Waveshare ESP32-S3 Ethernet",chip:"ESP32-S3",file:"waveshare_esp32_s3_eth.bin"}
@@ -79,17 +80,31 @@ function cleanupManifest(){
   if(manifestUrl){URL.revokeObjectURL(manifestUrl);manifestUrl=""}
 }
 
-function setManifest(board){
+async function boardVersion(board){
+  if(!board?.versionFile) return version||"unknown";
+  try{
+    const response=await fetch("./firmware/"+board.versionFile,{cache:"no-store"});
+    if(!response.ok) throw new Error("HTTP "+response.status);
+    return (await response.text()).trim()||"unknown";
+  }catch(error){
+    console.error("Unable to load board firmware version",error);
+    return "unknown";
+  }
+}
+
+async function setManifest(board){
   cleanupManifest();
   const firmwareUrl=new URL("./firmware/"+board.file,window.location.href).href;
+  const selectedVersion=await boardVersion(board);
   const manifest={
     name:"Solar2MQTT - "+board.name,
-    version:version||"unknown",
+    version:selectedVersion,
     new_install_prompt_erase:false,
     builds:[{chipFamily:board.chip,parts:[{path:firmwareUrl,offset:0}]}]
   };
   manifestUrl=URL.createObjectURL(new Blob([JSON.stringify(manifest)],{type:"application/json"}));
   installButton.setAttribute("manifest",manifestUrl);
+  versionEl.textContent=selectedVersion;
 }
 
 function refreshBoard(){
