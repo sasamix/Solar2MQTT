@@ -1,5 +1,11 @@
 Release Notes
 
+- 2.0.18M completes the explicit PowMr PI+Modbus protocol integration in the Web UI.
+- The PowMr settings page now accepts both `MODBUS_POWMR` and `MODBUS_POWMR_PI`.
+- Existing `MODBUS_POWMR`, PI30/PI41 and other protocols remain unchanged.
+- `MODBUS_POWMR_PI` remains manual-only and is never selected by autodetect.
+- Russian Web UI text now explains the manual hybrid-mode requirement.
+
 - 2.0.18L adds an explicit manual-only `PI+Modbus — PowMr HVM` protocol mode (`MODBUS_POWMR_PI`).
 - The existing `MODBUS_POWMR` mode is restored to pure Modbus behavior; other inverter protocols are unchanged.
 - Hybrid PI+Modbus is never selected by autodetect and must only be chosen for a compatible PowMr exposing Modbus and PI30 on the same UART.
