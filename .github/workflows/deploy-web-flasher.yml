@@ -90,6 +90,32 @@ jobs:
           path: site/firmware
           merge-multiple: true
 
+      - name: Fetch official ESP8266 Wemos D1 mini firmware
+        run: |
+          python - <<'PY'
+          import json, pathlib, urllib.request
+          api = "https://api.github.com/repos/softwarecrash/Solar2MQTT-ESP8266/releases/latest"
+          req = urllib.request.Request(api, headers={"User-Agent":"Solar2MQTT-Web-Flasher"})
+          with urllib.request.urlopen(req) as r:
+              data = json.load(r)
+          version = data.get("tag_name","").lstrip("Vv") or data.get("name","unknown")
+          asset = None
+          for a in data.get("assets",[]):
+              name = a.get("name","")
+              if name.startswith("Solar2MQTT-ESP8266_d1_mini_") and name.endswith(".bin") and "_OTA" not in name:
+                  asset = a
+                  break
+          if not asset:
+              raise SystemExit("ESP8266 d1_mini release asset not found")
+          out = pathlib.Path("site/firmware/wemos_d1_mini_esp8266.bin")
+          out.parent.mkdir(parents=True, exist_ok=True)
+          req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent":"Solar2MQTT-Web-Flasher"})
+          with urllib.request.urlopen(req) as r, out.open("wb") as f:
+              f.write(r.read())
+          pathlib.Path("site/firmware/wemos_d1_mini_esp8266.version").write_text(version+"\n")
+          print("ESP8266 version:", version, "asset:", asset["name"], "size:", out.stat().st_size)
+          PY
+
       - name: Build static site
         run: |
           cp -a web-flasher/. site/
@@ -100,6 +126,8 @@ jobs:
           test -s site/firmware/esp32c3_supermini.bin
           test -s site/firmware/esp32s3_supermini.bin
           test -s site/firmware/waveshare_esp32_s3_eth.bin
+          test -s site/firmware/wemos_d1_mini_esp8266.bin
+          test -s site/firmware/wemos_d1_mini_esp8266.version
           find site -maxdepth 2 -type f -printf '%p %k KB\n' | sort
 
       - name: Configure GitHub Pages
