@@ -5,6 +5,8 @@
 #include <Update.h>
 #include <WiFiClientSecure.h>
 #include <esp_timer.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -149,6 +151,65 @@ String GitHubOtaUpdater::statusJson() const
     serializeJson(doc, out);
     return out;
 }
+
+String GitHubOtaUpdater::diagnosticsJson(uint32_t firmwareSize) const
+{
+    JsonDocument doc;
+    doc["flashSize"] = static_cast<uint32_t>(ESP.getFlashChipSize());
+    doc["sketchSize"] = static_cast<uint32_t>(ESP.getSketchSize());
+    doc["freeSketchSpace"] = static_cast<uint32_t>(ESP.getFreeSketchSpace());
+    doc["firmwareSize"] = firmwareSize;
+
+    auto addPartition = [&doc](const char *name, const esp_partition_t *partition)
+    {
+        JsonObject item = doc[name].to<JsonObject>();
+        item["present"] = partition != nullptr;
+        if (partition == nullptr)
+        {
+            return;
+        }
+        item["label"] = partition->label ? partition->label : "";
+        item["address"] = static_cast<uint32_t>(partition->address);
+        item["size"] = static_cast<uint32_t>(partition->size);
+        item["type"] = static_cast<uint32_t>(partition->type);
+        item["subtype"] = static_cast<uint32_t>(partition->subtype);
+    };
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    const esp_partition_t *boot = esp_ota_get_boot_partition();
+    const esp_partition_t *next = esp_ota_get_next_update_partition(nullptr);
+    const esp_partition_t *otaData =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, nullptr);
+
+    addPartition("running", running);
+    addPartition("boot", boot);
+    addPartition("nextOta", next);
+    addPartition("otaData", otaData);
+
+    bool ready = next != nullptr;
+    String reason;
+    if (next == nullptr)
+    {
+        reason = "No next OTA partition";
+    }
+    else if (firmwareSize > 0 && firmwareSize > next->size)
+    {
+        ready = false;
+        reason = "Firmware larger than next OTA partition";
+    }
+    else
+    {
+        reason = "OK";
+    }
+
+    doc["otaReady"] = ready;
+    doc["reason"] = reason;
+
+    String out;
+    serializeJson(doc, out);
+    return out;
+}
+
 
 void GitHubOtaUpdater::checkTask(void *param)
 {
@@ -340,11 +401,32 @@ void GitHubOtaUpdater::doDownload()
     _bytesTotal = (total > 0) ? static_cast<uint32_t>(total) : 0;
     _bytesDone = 0;
     unlock();
+    const esp_partition_t *nextPartition = esp_ota_get_next_update_partition(nullptr);
+    if (nextPartition == nullptr)
+    {
+        http.end();
+        setState(State::Error, "OTA preflight failed: no next OTA partition");
+        return;
+    }
+
+    if (total > 0 && static_cast<uint32_t>(total) > nextPartition->size)
+    {
+        http.end();
+        setState(State::Error,
+                 "OTA preflight failed: firmware " + String(total) +
+                     " bytes exceeds next partition " + String(nextPartition->size) + " bytes");
+        return;
+    }
 
     if (!Update.begin(total > 0 ? static_cast<uint32_t>(total) : UPDATE_SIZE_UNKNOWN))
     {
+        const uint8_t updateError = Update.getError();
         http.end();
-        setState(State::Error, "Update begin failed");
+        setState(State::Error,
+                 "Update begin failed; error=" + String(updateError) +
+                     "; next=" + String(nextPartition->label ? nextPartition->label : "?") +
+                     "; nextSize=" + String(nextPartition->size) +
+                     "; freeSketch=" + String(ESP.getFreeSketchSpace()));
         return;
     }
 
