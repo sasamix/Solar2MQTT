@@ -49,6 +49,19 @@ void appendTopicIfMissing(std::vector<String> &topics, const String &topic)
     }
 }
 
+bool isPowMrProtocolName(const char *protocol)
+{
+    return protocol != nullptr &&
+           (strcmp(protocol, "MODBUS_POWMR") == 0 ||
+            strcmp(protocol, "MODBUS_POWMR_PI") == 0);
+}
+
+bool isPowMrPiHybridProtocolName(const char *protocol)
+{
+    return protocol != nullptr && strcmp(protocol, "MODBUS_POWMR_PI") == 0;
+}
+
+
 bool isPowMrWritableSettingKey(const char *key)
 {
     if (key == nullptr)
@@ -74,6 +87,17 @@ bool isPowMrWritableSettingKey(const char *key)
         "Battery_Equalization_Time",
         "Battery_Equalization_Timeout",
         "Battery_Equalization_Interval",
+        DESCR_Buzzer_Enabled,
+        DESCR_Overload_Bypass_Enabled,
+        DESCR_Power_Saving_Enabled,
+        DESCR_LCD_Reset_To_Default_Enabled,
+        DESCR_Data_Log_Pop_Up,
+        DESCR_Overload_Restart_Enabled,
+        DESCR_Over_Temperature_Restart_Enabled,
+        DESCR_LCD_Backlight_Enabled,
+        DESCR_Primary_Source_Interrupt_Alarm_Enabled,
+        DESCR_Record_Fault_Code_Enabled,
+        DESCR_Solar_Feed_To_Grid_Enabled,
     };
 
     for (const char *candidate : keys)
@@ -98,7 +122,7 @@ String buildDiscoveryTopic(const String &baseTopic, const char *component, const
 
 void purgeHaDiscoveryKey(PubSubClient &client, const String &deviceId, const char *key)
 {
-    const char *const components[] = {"sensor", "binary_sensor", "number", "select"};
+    const char *const components[] = {"sensor", "binary_sensor", "number", "select", "switch"};
     for (const char *component : components)
     {
         const String topic = buildDiscoveryTopic(deviceId, component, key);
@@ -178,6 +202,24 @@ bool isApprovedHaDiscoveryKey(const char *component, const char *key, bool powMr
         return stringEqualsAny(key, selectKeys, sizeof(selectKeys) / sizeof(selectKeys[0]));
     }
 
+    if (strcmp(component, "switch") == 0)
+    {
+        const char *const switchKeys[] = {
+            DESCR_Buzzer_Enabled,
+            DESCR_Overload_Bypass_Enabled,
+            DESCR_Power_Saving_Enabled,
+            DESCR_LCD_Reset_To_Default_Enabled,
+            DESCR_Data_Log_Pop_Up,
+            DESCR_Overload_Restart_Enabled,
+            DESCR_Over_Temperature_Restart_Enabled,
+            DESCR_LCD_Backlight_Enabled,
+            DESCR_Primary_Source_Interrupt_Alarm_Enabled,
+            DESCR_Record_Fault_Code_Enabled,
+            DESCR_Solar_Feed_To_Grid_Enabled,
+        };
+        return stringEqualsAny(key, switchKeys, sizeof(switchKeys) / sizeof(switchKeys[0]));
+    }
+
     if (strcmp(component, "number") == 0)
     {
         const char *const numberKeys[] = {
@@ -193,6 +235,17 @@ bool isApprovedHaDiscoveryKey(const char *component, const char *key, bool powMr
             "Battery_Equalization_Time",
             "Battery_Equalization_Timeout",
             "Battery_Equalization_Interval",
+            DESCR_Buzzer_Enabled,
+            DESCR_Overload_Bypass_Enabled,
+            DESCR_Power_Saving_Enabled,
+            DESCR_LCD_Reset_To_Default_Enabled,
+            DESCR_Data_Log_Pop_Up,
+            DESCR_Overload_Restart_Enabled,
+            DESCR_Over_Temperature_Restart_Enabled,
+            DESCR_LCD_Backlight_Enabled,
+            DESCR_Primary_Source_Interrupt_Alarm_Enabled,
+            DESCR_Record_Fault_Code_Enabled,
+            DESCR_Solar_Feed_To_Grid_Enabled,
         };
         return stringEqualsAny(key, numberKeys, sizeof(numberKeys) / sizeof(numberKeys[0]));
     }
@@ -757,6 +810,17 @@ bool MqttHandler::ensureConnected()
             "Battery_Equalization_Time",
             "Battery_Equalization_Timeout",
             "Battery_Equalization_Interval",
+            DESCR_Buzzer_Enabled,
+            DESCR_Overload_Bypass_Enabled,
+            DESCR_Power_Saving_Enabled,
+            DESCR_LCD_Reset_To_Default_Enabled,
+            DESCR_Data_Log_Pop_Up,
+            DESCR_Overload_Restart_Enabled,
+            DESCR_Over_Temperature_Restart_Enabled,
+            DESCR_LCD_Backlight_Enabled,
+            DESCR_Primary_Source_Interrupt_Alarm_Enabled,
+            DESCR_Record_Fault_Code_Enabled,
+            DESCR_Solar_Feed_To_Grid_Enabled,
         };
         for (const char *key : oldSettingSensorKeys)
         {
@@ -1014,6 +1078,24 @@ void MqttHandler::publishHaDiscovery(bool force)
                 purgeHaDiscoveryComponent(_mqtt, deviceId, "binary_sensor", key);
             }
         }
+        else if (isPowMrPiHybridProtocolName(protocol))
+        {
+            // In hybrid mode keep the PI-only values we actively refresh, but
+            // remove stale duplicates/raw fields that are intentionally not
+            // part of the hybrid HA surface.
+            const char *const obsoleteHybridKeys[] = {
+                DESCR_AC_Out_Percent,
+                DESCR_Battery_Load,
+                DESCR_Status_Flag,
+                DESCR_Battery_Voltage_Offset_Fans_On,
+            };
+            const String deviceId = getHaDeviceId();
+            for (const char *key : obsoleteHybridKeys)
+            {
+                purgeHaDiscoveryComponent(_mqtt, deviceId, "sensor", key);
+                purgeHaDiscoveryComponent(_mqtt, deviceId, "binary_sensor", key);
+            }
+        }
     }
 
     std::vector<String> currentTopics;
@@ -1076,7 +1158,7 @@ void MqttHandler::publishHaSection(JsonDocument &snapshot,
         const char *key = entry.key().c_str();
         const char *activeProtocol = snapshot["Status"]["protocol"] | "";
         if (strcmp(stateSection, "DeviceData") == 0 &&
-            strcmp(activeProtocol, "MODBUS_POWMR") == 0 &&
+            isPowMrProtocolName(activeProtocol) &&
             isPowMrWritableSettingKey(key))
         {
             continue;
@@ -1244,10 +1326,11 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
 {
     JsonObjectConst status = snapshot["Status"].as<JsonObjectConst>();
     const char *protocol = status["protocol"] | "";
-    if (strcmp(protocol, "MODBUS_POWMR") != 0)
+    if (!isPowMrProtocolName(protocol))
     {
         return;
     }
+    const bool hybridPi = isPowMrPiHybridProtocolName(protocol);
 
     const String topicBase = baseTopic();
     const String deviceId = getHaDeviceId();
@@ -1287,6 +1370,7 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
         doc["payload_not_available"] = "false";
         doc["unique_id"] = buildUniqueId(deviceId, "PowMrSetting", key);
         doc["icon"] = "mdi:tune-variant";
+        doc["entity_category"] = "config";
         doc["qos"] = 1;
 
         JsonArray opts = doc["options"].to<JsonArray>();
@@ -1338,11 +1422,58 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
         doc["max"] = maxValue;
         doc["step"] = step;
         doc["mode"] = "box";
+        doc["entity_category"] = "config";
         doc["qos"] = 1;
         if (unit != nullptr && unit[0] != '\0')
         {
             doc["unit_of_measurement"] = unit;
         }
+
+        populateDeviceInfo(doc, snapshot);
+
+        String payload;
+        serializeJson(doc, payload);
+        _mqtt.publish(topic.c_str(), payload.c_str(), true);
+        appendTopicIfMissing(_haDiscoveryTopics, topic);
+    };
+
+    auto publishSwitch = [&](const char *key,
+                              const char *name,
+                              char piFlag)
+    {
+        JsonVariantConst state = deviceValues[key];
+        if (!state.is<bool>())
+        {
+            return;
+        }
+
+        const String topic = buildDiscoveryTopic(deviceId, "switch", key);
+        appendTopicIfMissing(currentTopics, topic);
+        if (!force && hasHaDiscoveryTopic(topic))
+        {
+            return;
+        }
+
+        // Remove the old passive forms if a previous firmware exposed the
+        // same QFLAG value as a sensor/binary_sensor.
+        purgeHaDiscoveryComponent(_mqtt, deviceId, "sensor", key);
+        purgeHaDiscoveryComponent(_mqtt, deviceId, "binary_sensor", key);
+
+        JsonDocument doc;
+        doc["name"] = name;
+        doc["state_topic"] = topicBase + "/DeviceData/" + key;
+        doc["command_topic"] = commandTopic;
+        doc["payload_on"] = String("powmr pi PE") + piFlag;
+        doc["payload_off"] = String("powmr pi PD") + piFlag;
+        doc["state_on"] = "true";
+        doc["state_off"] = "false";
+        doc["availability_topic"] = availabilityTopic;
+        doc["payload_available"] = "true";
+        doc["payload_not_available"] = "false";
+        doc["unique_id"] = buildUniqueId(deviceId, "PowMrPiSetting", key);
+        doc["icon"] = "mdi:toggle-switch";
+        doc["entity_category"] = "config";
+        doc["qos"] = 1;
 
         populateDeviceInfo(doc, snapshot);
 
@@ -1389,6 +1520,44 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
     publishNumber("Battery_Equalization_Time", "Время выравнивания АКБ", "equalizationtime", 0, 999, 1, "min");
     publishNumber("Battery_Equalization_Timeout", "Тайм-аут выравнивания АКБ", "equalizationtimeout", 0, 999, 1, "min");
     publishNumber("Battery_Equalization_Interval", "Интервал выравнивания АКБ", "equalizationinterval", 0, 999, 1, "d");
+
+    const char *const piSwitchKeys[] = {
+        DESCR_Buzzer_Enabled,
+        DESCR_Overload_Bypass_Enabled,
+        DESCR_Power_Saving_Enabled,
+        DESCR_LCD_Reset_To_Default_Enabled,
+        DESCR_Data_Log_Pop_Up,
+        DESCR_Overload_Restart_Enabled,
+        DESCR_Over_Temperature_Restart_Enabled,
+        DESCR_LCD_Backlight_Enabled,
+        DESCR_Primary_Source_Interrupt_Alarm_Enabled,
+        DESCR_Record_Fault_Code_Enabled,
+        DESCR_Solar_Feed_To_Grid_Enabled,
+    };
+
+    if (hybridPi)
+    {
+        publishSwitch(DESCR_Buzzer_Enabled, "Зуммер", 'a');
+        publishSwitch(DESCR_Overload_Bypass_Enabled, "Байпас при перегрузке", 'b');
+        publishSwitch(DESCR_Power_Saving_Enabled, "Режим энергосбережения", 'j');
+        publishSwitch(DESCR_LCD_Reset_To_Default_Enabled, "Сброс LCD к значениям по умолчанию", 'k');
+        publishSwitch(DESCR_Data_Log_Pop_Up, "Всплывающее окно журнала", 'l');
+        publishSwitch(DESCR_Solar_Feed_To_Grid_Enabled, "Разрешение отдачи в сеть", 'd');
+        publishSwitch(DESCR_Overload_Restart_Enabled, "Перезапуск после перегрузки", 'u');
+        publishSwitch(DESCR_Over_Temperature_Restart_Enabled, "Перезапуск после перегрева", 'v');
+        publishSwitch(DESCR_LCD_Backlight_Enabled, "Подсветка LCD", 'x');
+        publishSwitch(DESCR_Primary_Source_Interrupt_Alarm_Enabled, "Сигнал потери основного источника", 'y');
+        publishSwitch(DESCR_Record_Fault_Code_Enabled, "Запись кодов ошибок", 'z');
+    }
+    else if (force)
+    {
+        // Pure MODBUS_POWMR must not retain PI-only controls from a previous
+        // hybrid configuration.
+        for (const char *key : piSwitchKeys)
+        {
+            purgeHaDiscoveryComponent(_mqtt, deviceId, "switch", key);
+        }
+    }
 }
 
 void MqttHandler::startHaDiscoverySweep()
@@ -1401,7 +1570,7 @@ void MqttHandler::startHaDiscoverySweep()
     JsonDocument snapshot;
     _state.snapshotTo(snapshot);
     const char *protocol = snapshot["Status"]["protocol"] | "";
-    _haDiscoverySweepPowMr = strcmp(protocol, "MODBUS_POWMR") == 0;
+    _haDiscoverySweepPowMr = isPowMrProtocolName(protocol);
 
     _haDiscoverySweepTopic = String("homeassistant/+/") + getHaDeviceId() + "/+/config";
     if (_mqtt.subscribe(_haDiscoverySweepTopic.c_str()))

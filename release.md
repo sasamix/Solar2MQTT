@@ -1,5 +1,16 @@
 Release Notes
 
+- 2.0.18L adds an explicit manual-only `PI+Modbus — PowMr HVM` protocol mode (`MODBUS_POWMR_PI`).
+- The existing `MODBUS_POWMR` mode is restored to pure Modbus behavior; other inverter protocols are unchanged.
+- Hybrid PI+Modbus is never selected by autodetect and must only be chosen for a compatible PowMr exposing Modbus and PI30 on the same UART.
+- Modbus remains authoritative. PI30 supplement queries only add selected values not available from the verified PowMr Modbus register map.
+- Hybrid supplement reads selected QPIRI values including rated active/apparent power, rated current/voltage, machine type, parallel limit, output mode, operation logic, PV balance and discharge limit.
+- Hybrid supplement reads selected QPIGS values including inverter bus voltage/temperature, PV input current, SCC battery voltage, EEPROM version, PV charging power and device status.
+- Q1 supplement keeps temperatures, fan data and charge state without overwriting the Modbus inverter temperature.
+- QFLAG values are exposed as Home Assistant configuration switches only in hybrid mode: buzzer, overload bypass/restart, over-temperature restart, power saving, LCD reset/backlight, data-log popup, primary-source alarm, fault recording and feed-to-grid.
+- PI-only writes use the existing `powmr pi` transport and are accepted only while the explicit hybrid protocol is selected.
+- Hybrid PI requests are rate-limited to at most one request per complete Modbus pass.
+
 - 2.0.18K makes Home Assistant cleanup protocol-aware for MODBUS_POWMR.
 - Removes stale retained PI30/QPIRI/QPIGS entities that are not updated by the active PowMr Modbus protocol and could show old English names or conflicting values.
 - Keeps the native PowMr Modbus telemetry, Q1 supplemental temperature/fan/charge-state data, dedicated PowMr select/number settings, and native battery power/energy counters.
