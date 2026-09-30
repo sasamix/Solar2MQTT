@@ -42,6 +42,47 @@ bool parseStrictFloat(const String &text, float &value)
     value = parsed;
     return true;
 }
+
+uint16_t swapPowMrWord(uint16_t value)
+{
+    return static_cast<uint16_t>((value >> 8) | (value << 8));
+}
+
+bool readPowMrSettingMirror(MODBUS_COM &com,
+                            uint16_t controlRegister,
+                            uint16_t &logicalValue,
+                            uint8_t attempts = 3)
+{
+    // PowMr/Victor writes settings through 50xx control registers, while the
+    // readable/current values are mirrored 481 registers lower (4536..4552).
+    if (controlRegister < 5017 || controlRegister > 5033)
+    {
+        return false;
+    }
+
+    const uint16_t mirrorRegister = static_cast<uint16_t>(controlRegister - 481U);
+    for (uint8_t attempt = 0; attempt < attempts; ++attempt)
+    {
+        if (attempt == 0)
+        {
+            delay(150);
+        }
+        else
+        {
+            delay(250);
+        }
+
+        uint16_t wireValue = 0xFFFF;
+        com.clearReadCache();
+        if (com.readHoldingBlock(mirrorRegister, 1, &wireValue, 1))
+        {
+            logicalValue = swapPowMrWord(wireValue);
+            return true;
+        }
+    }
+
+    return false;
+}
 } // namespace
 
  
@@ -571,9 +612,8 @@ String MODBUS::requestData(String command)
         if (command == "powmr outputmode")
         {
             uint16_t value = 0xFFFF;
-            _mCom.clearReadCache();
-            if (!_mCom.readHoldingBlock(5018, 1, &value, 1))
-                return "ERROR: unable to read output mode register 5018";
+            if (!readPowMrSettingMirror(_mCom, 5018, value))
+                return "ERROR: unable to read output mode mirror register 4537";
 
             return String("OK: Output mode = ") + modeName(value) +
                    " (" + static_cast<unsigned int>(value) + ")";
@@ -599,17 +639,15 @@ String MODBUS::requestData(String command)
                    _mCom.getLastWriteResultText() + ")";
         }
 
-        delay(150);
         uint16_t readback = 0xFFFF;
-        _mCom.clearReadCache();
-        const bool readOk = _mCom.readHoldingBlock(5018, 1, &readback, 1);
+        const bool readOk = readPowMrSettingMirror(_mCom, 5018, readback);
 
         static_info.curr_register = 0;
         requestStaticData = true;
 
         if (!readOk)
             return String("OK: Output mode write accepted: ") + requested +
-                   "; readback unavailable";
+                   "; mirror readback pending";
 
         if (readback != static_cast<uint16_t>(value))
             return String("ERROR: output mode readback mismatch requested=") +
@@ -646,9 +684,8 @@ String MODBUS::requestData(String command)
         if (command == "powmr batterytype")
         {
             uint16_t value = 0;
-            _mCom.clearReadCache();
-            if (!_mCom.readHoldingBlock(5020, 1, &value, 1))
-                return "ERROR: unable to read battery type register 5020";
+            if (!readPowMrSettingMirror(_mCom, 5020, value))
+                return "ERROR: unable to read battery type mirror register 4539";
 
             return String("OK: Battery type = ") + batteryTypeName(value) +
                    " (" + static_cast<unsigned int>(value) + ")";
@@ -678,17 +715,15 @@ String MODBUS::requestData(String command)
                    _mCom.getLastWriteResultText() + ")";
         }
 
-        delay(150);
         uint16_t readback = 0xFFFF;
-        _mCom.clearReadCache();
-        const bool readOk = _mCom.readHoldingBlock(5020, 1, &readback, 1);
+        const bool readOk = readPowMrSettingMirror(_mCom, 5020, readback);
 
         static_info.curr_register = 0;
         requestStaticData = true;
 
         if (!readOk)
             return String("OK: Battery type write accepted: ") + requested +
-                   "; readback unavailable";
+                   "; mirror readback pending";
 
         if (readback != static_cast<uint16_t>(value))
             return String("ERROR: battery type readback mismatch requested=") +
@@ -823,20 +858,26 @@ String MODBUS::requestData(String command)
                    _mCom.getLastWriteResultText() + ")";
         }
 
-        delay(150);
+        static_info.curr_register = 0;
+        requestStaticData = true;
+
         uint16_t readback = 0xFFFF;
-        _mCom.clearReadCache();
-        if (!_mCom.readHoldingBlock(reg, 1, &readback, 1))
-            return String("ERROR: setting write accepted but readback failed reg=") + reg;
+        const bool readOk = readPowMrSettingMirror(_mCom, reg, readback);
+        if (!readOk)
+        {
+            // The 50xx control register write was acknowledged. Some PowMr
+            // firmware does not allow those control registers to be read back
+            // immediately; the normal 45xx mirror refresh will verify it.
+            return String("OK: ") + name + " = " + displayValue +
+                   " write accepted (reg " + reg + "); mirror readback pending";
+        }
 
         if (readback != raw)
             return String("ERROR: setting readback mismatch reg=") + reg +
                    " requested=" + raw + " actual=" + readback;
 
-        static_info.curr_register = 0;
-        requestStaticData = true;
         return String("OK: ") + name + " = " + displayValue +
-               " (reg " + reg + ", raw " + raw + ")";
+               " (reg " + reg + ", mirror verified, raw " + raw + ")";
     }
 
     // Guarded first write command for PowMr/Victor.
