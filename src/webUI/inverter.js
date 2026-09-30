@@ -90,6 +90,32 @@
     setResult("Values loaded from inverter.");
   }
 
+  const valuesMatch = (id, actual, expected) => {
+    const a = normalize(id, actual);
+    const e = normalize(id, expected);
+    const an = Number(a);
+    const en = Number(e);
+    if (Number.isFinite(an) && Number.isFinite(en)) {
+      return Math.abs(an - en) < 0.001;
+    }
+    return String(a) === String(e);
+  };
+
+  async function waitForValue(id, key, expected, timeoutMs = 8000) {
+    const started = Date.now();
+    let last = null;
+    while (Date.now() - started < timeoutMs) {
+      const data = await fetchJson("/api/data");
+      const raw = findValue(data, key);
+      if (raw != null) {
+        last = normalize(id, raw);
+        if (valuesMatch(id, last, expected)) return { matched: true, value: last };
+      }
+      await sleep(300);
+    }
+    return { matched: false, value: last };
+  };
+
   async function sendCommand(command) {
     const before = await fetchJson("/api/data");
     const previous = before?.RawData?.CommandAnswer || "";
@@ -144,12 +170,25 @@
 
         const answer = await sendCommand(command);
         log.push(answer);
-        initial.set(item.id, String(byId(item.id).value));
+
+        const confirmed = await waitForValue(item.id, item.key, item.value);
+        if (confirmed.matched) {
+          const el = byId(item.id);
+          if (el) el.value = confirmed.value;
+          initial.set(item.id, String(confirmed.value));
+        } else {
+          // The inverter acknowledged the write, but the next Modbus static
+          // refresh has not reached /api/data yet. Keep the requested value
+          // visible instead of overwriting it with stale cached DeviceData.
+          initial.set(item.id, String(item.value));
+          log.push(`Waiting for refreshed value: ${item.key}`);
+        }
       }
 
       setResult("Saved:\n" + log.join("\n"));
-      await sleep(400);
-      await loadValues();
+      // Do not immediately call loadValues() here: it can still contain the
+      // pre-write DeviceData value and would visually revert a successful save.
+      // waitForValue() above updates each field only after /api/data confirms it.
     } catch (error) {
       log.push("ERROR: " + error.message);
       setResult(log.join("\n"), true);
