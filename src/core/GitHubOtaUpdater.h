@@ -26,6 +26,7 @@ public:
     bool requestCheck();
     bool startUpdate();
     String statusJson() const;
+    String diagnosticsJson(uint32_t firmwareSize = 0) const;
     bool isBusy() const;
 
 private:
