@@ -1,5 +1,13 @@
 Release Notes
 
+- 2.0.18P completes PowMr PI+Modbus configuration handling in the built-in Web UI.
+- The inverter settings page now exposes battery equalization enable/disable plus all QFLAG settings as real toggle switches and shows whether equalization is currently active.
+- Web switches are available only when `MODBUS_POWMR_PI` is active and are disabled in pure Modbus mode.
+- PI write replies using `ACK` are treated as successful Web UI commands; the page then waits for the refreshed inverter state before confirming the switch.
+- Home Assistant keeps only automation-relevant PowMr switches: battery equalization, overload bypass, power saving, overload restart, over-temperature restart, and solar feed-to-grid.
+- Panel/service-only flags are removed from HA Discovery and remain configurable in the Web UI: buzzer, LCD reset, LCD backlight, data-log pop-up, primary-source interrupt alarm, and fault-code recording.
+- Existing numeric/select inverter settings and 2.0.18O post-write refresh behavior are unchanged.
+
 - 2.0.18O fixes stale values shown by the PowMr inverter settings Web UI immediately after a successful write.
 - After each accepted setting change the page now polls /api/data until the requested value is actually present in refreshed DeviceData, instead of reloading the old cached value after 400 ms.
 - If the inverter state refresh takes longer than the confirmation window, the requested value remains visible and the UI reports that state refresh is still pending instead of visually reverting to the previous value.
