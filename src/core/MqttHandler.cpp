@@ -958,6 +958,64 @@ void MqttHandler::publishHaDiscovery(bool force)
     JsonDocument snapshot;
     _state.snapshotTo(snapshot);
 
+    if (force)
+    {
+        const char *protocol = snapshot["Status"]["protocol"] | "";
+        if (strcmp(protocol, "MODBUS_POWMR") == 0)
+        {
+            // Older PI30/QPIRI/QPIGS discovery entries can survive as
+            // retained Home Assistant entities after the inverter switches
+            // to the native PowMr Modbus protocol. They are not refreshed by
+            // MODBUS_POWMR and can show stale or conflicting values.
+            const char *const obsoletePowMrPiKeys[] = {
+                DESCR_AC_In_Rating_Current,
+                DESCR_AC_In_Rating_Voltage,
+                DESCR_AC_Out_Percent,
+                DESCR_AC_Out_Rating_Active_Power,
+                DESCR_AC_Out_Rating_Apparent_Power,
+                DESCR_AC_Out_Rating_Current,
+                DESCR_Battery_Load,
+                DESCR_Battery_Rating_Voltage,
+                DESCR_Battery_SCC_Volt,
+                DESCR_Battery_Voltage_Offset_Fans_On,
+                DESCR_Buzzer_Enabled,
+                DESCR_Data_Log_Pop_Up,
+                DESCR_Device_Status,
+                DESCR_EEPROM_Version,
+                DESCR_Inverter_Bus_Temperature,
+                DESCR_Inverter_Bus_Voltage,
+                DESCR_LCD_Backlight_Enabled,
+                DESCR_LCD_Reset_To_Default_Enabled,
+                DESCR_Machine_Type,
+                DESCR_Max_Charging_Time_At_CV_Stage,
+                DESCR_Max_Discharging_Current,
+                DESCR_Operation_Logic,
+                DESCR_Output_Mode,
+                DESCR_Over_Temperature_Restart_Enabled,
+                DESCR_Overload_Bypass_Enabled,
+                DESCR_Overload_Restart_Enabled,
+                DESCR_Parallel_Max_Num,
+                DESCR_Power_Saving_Enabled,
+                DESCR_Primary_Source_Interrupt_Alarm_Enabled,
+                DESCR_PV_Charging_Power,
+                DESCR_PV_OK_Condition_For_Parallel,
+                DESCR_PV_Power_Balance,
+                DESCR_PV1_Input_Current,
+                DESCR_Record_Fault_Code_Enabled,
+                DESCR_Solar_Feed_To_Grid_Enabled,
+                DESCR_Status_Flag,
+                DESCR_Topology,
+            };
+
+            const String deviceId = getHaDeviceId();
+            for (const char *key : obsoletePowMrPiKeys)
+            {
+                purgeHaDiscoveryComponent(_mqtt, deviceId, "sensor", key);
+                purgeHaDiscoveryComponent(_mqtt, deviceId, "binary_sensor", key);
+            }
+        }
+    }
+
     std::vector<String> currentTopics;
     currentTopics.reserve(_haDiscoveryTopics.size() + 16);
 
