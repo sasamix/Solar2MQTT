@@ -359,6 +359,7 @@ PI_Serial::PI_Serial(HardwareSerial &serialPort, int rx, int tx)
     get.raw.qpibi.reserve(80);
     get.raw.qmn.reserve(48);
     get.raw.qflag.reserve(24);
+    get.raw.qbeqi.reserve(80);
     get.raw.q1.reserve(64);
     get.raw.qpigs.reserve(96);
     get.raw.qpigs2.reserve(24);
@@ -1300,6 +1301,28 @@ bool PI_Serial::runPowMrPiSupplementCommand(const char *command)
     {
         ok = PIXX_QFLAG();
     }
+    else if (strcmp(command, "QBEQI") == 0)
+    {
+        get.raw.qbeqi = requestData("QBEQI");
+        if (isValidResponse(get.raw.qbeqi))
+        {
+            char buffer[128];
+            get.raw.qbeqi.toCharArray(buffer, sizeof(buffer));
+            char *fields[12];
+            const int fieldCount = pi_split_fields(buffer, ' ', fields, 12);
+            if (fieldCount >= 1 &&
+                (strcmp(fields[0], "0") == 0 || strcmp(fields[0], "1") == 0))
+            {
+                staticData[DESCR_Battery_Equalization_Enabled] = strcmp(fields[0], "1") == 0;
+                if (fieldCount >= 9 &&
+                    (strcmp(fields[8], "0") == 0 || strcmp(fields[8], "1") == 0))
+                {
+                    liveData[DESCR_Battery_Equalization_Active] = strcmp(fields[8], "1") == 0;
+                }
+                ok = true;
+            }
+        }
+    }
 
     JsonDocument piStatic;
     JsonDocument piLive;
@@ -1363,6 +1386,24 @@ bool PI_Serial::runPowMrPiSupplementCommand(const char *command)
                              piLive.as<JsonObjectConst>(),
                              keys,
                              sizeof(keys) / sizeof(keys[0]));
+    }
+    else if (strcmp(command, "QBEQI") == 0)
+    {
+        static const char *const staticKeys[] = {
+            DESCR_Battery_Equalization_Enabled,
+        };
+        copySelectedJsonKeys(staticData,
+                             piStatic.as<JsonObjectConst>(),
+                             staticKeys,
+                             sizeof(staticKeys) / sizeof(staticKeys[0]));
+
+        static const char *const liveKeys[] = {
+            DESCR_Battery_Equalization_Active,
+        };
+        copySelectedJsonKeys(liveData,
+                             piLive.as<JsonObjectConst>(),
+                             liveKeys,
+                             sizeof(liveKeys) / sizeof(liveKeys[0]));
     }
     else if (strcmp(command, "QFLAG") == 0)
     {
@@ -1431,6 +1472,18 @@ bool PI_Serial::pollPowMrPiSupplement()
         {
             powMrPiLastQflagAt = now;
             powMrPiFlagRefreshRequested = false;
+        }
+        return true;
+    }
+
+    if (powMrPiEqualizationRefreshRequested ||
+        powMrPiLastQbeqiAt == 0 ||
+        (now - powMrPiLastQbeqiAt) >= 60000UL)
+    {
+        if (runPowMrPiSupplementCommand("QBEQI"))
+        {
+            powMrPiLastQbeqiAt = now;
+            powMrPiEqualizationRefreshRequested = false;
         }
         return true;
     }
@@ -1507,6 +1560,10 @@ bool PI_Serial::sendCustomCommand()
                 piCommand.length() >= 3)
             {
                 powMrPiFlagRefreshRequested = true;
+            }
+            if (piCommand.startsWith("PBEQE"))
+            {
+                powMrPiEqualizationRefreshRequested = true;
             }
 
             protocol = savedProtocol;
