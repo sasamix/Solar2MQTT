@@ -1,5 +1,10 @@
 Release Notes
 
+- 2.0.18O fixes stale values shown by the PowMr inverter settings Web UI immediately after a successful write.
+- After each accepted setting change the page now polls /api/data until the requested value is actually present in refreshed DeviceData, instead of reloading the old cached value after 400 ms.
+- If the inverter state refresh takes longer than the confirmation window, the requested value remains visible and the UI reports that state refresh is still pending instead of visually reverting to the previous value.
+- This complements the 2.0.18N mirror-register verification fix; no inverter protocol behavior is changed.
+
 - 2.0.18N adds explicit battery equalization control for the PowMr PI+Modbus mode.
 - `QBEQI` is polled in hybrid mode; Home Assistant receives «Выравнивание АКБ» as a configuration switch and «Выравнивание АКБ активно» as the current equalization activity state.
 - The switch uses the PI30 commands `PBEQE1` / `PBEQE0` and refreshes `QBEQI` after a write.
