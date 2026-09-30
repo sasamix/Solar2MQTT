@@ -10,7 +10,6 @@ on:
       - 'tools/**'
       - 'partitions/**'
       - 'web-flasher/**'
-      - 'esp8266-patches/**'
       - '.github/workflows/deploy-web-flasher.yml'
   workflow_dispatch:
 
@@ -71,56 +70,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  build-esp8266:
-    runs-on: ubuntu-latest
-    env:
-      ESP8266_BUILD_VERSION: 1.2.0-sasamix.1
-
-    steps:
-      - name: Checkout our fork
-        uses: actions/checkout@v4
-
-      - name: Checkout official ESP8266 source
-        uses: actions/checkout@v4
-        with:
-          repository: softwarecrash/Solar2MQTT-ESP8266
-          ref: master
-          path: esp8266-src
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install PlatformIO
-        run: pip install platformio
-
-      - name: Apply our ESP8266 patches
-        run: |
-          ESP8266_SRC=esp8266-src python esp8266-patches/apply.py
-
-      - name: Build Wemos D1 mini ESP8266
-        run: pio run -d esp8266-src -e d1_mini
-
-      - name: Stage ESP8266 image
-        run: |
-          mkdir -p bundle
-          SOURCE="$(find esp8266-src/.firmware -maxdepth 1 -type f -name 'Solar2MQTT-ESP8266_d1_mini_*.bin' ! -name '*_OTA*' | head -1)"
-          test -n "$SOURCE"
-          test -s "$SOURCE"
-          cp "$SOURCE" bundle/wemos_d1_mini_esp8266.bin
-          printf '%s\n' "$ESP8266_BUILD_VERSION" > bundle/wemos_d1_mini_esp8266.version
-          ls -lh bundle/
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: web-flasher-wemos_d1_mini_esp8266
-          path: bundle/*
-          if-no-files-found: error
-          retention-days: 7
-
   build-site:
     runs-on: ubuntu-latest
-    needs: [build-firmware, build-esp8266]
+    needs: build-firmware
 
     steps:
       - uses: actions/checkout@v4
@@ -137,6 +89,32 @@ jobs:
           pattern: web-flasher-*
           path: site/firmware
           merge-multiple: true
+
+      - name: Fetch official ESP8266 Wemos D1 mini firmware
+        run: |
+          python - <<'PY'
+          import json, pathlib, urllib.request
+          api = "https://api.github.com/repos/softwarecrash/Solar2MQTT-ESP8266/releases/latest"
+          req = urllib.request.Request(api, headers={"User-Agent":"Solar2MQTT-Web-Flasher"})
+          with urllib.request.urlopen(req) as r:
+              data = json.load(r)
+          version = data.get("tag_name","").lstrip("Vv") or data.get("name","unknown")
+          asset = None
+          for a in data.get("assets",[]):
+              name = a.get("name","")
+              if name.startswith("Solar2MQTT-ESP8266_d1_mini_") and name.endswith(".bin") and "_OTA" not in name:
+                  asset = a
+                  break
+          if not asset:
+              raise SystemExit("ESP8266 d1_mini release asset not found")
+          out = pathlib.Path("site/firmware/wemos_d1_mini_esp8266.bin")
+          out.parent.mkdir(parents=True, exist_ok=True)
+          req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent":"Solar2MQTT-Web-Flasher"})
+          with urllib.request.urlopen(req) as r, out.open("wb") as f:
+              f.write(r.read())
+          pathlib.Path("site/firmware/wemos_d1_mini_esp8266.version").write_text(version+"\n")
+          print("ESP8266 version:", version, "asset:", asset["name"], "size:", out.stat().st_size)
+          PY
 
       - name: Build static site
         run: |
