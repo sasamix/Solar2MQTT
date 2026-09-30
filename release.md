@@ -1,5 +1,12 @@
 Release Notes
 
+- 2.0.18S adds OTA preflight and remote recovery diagnostics.
+- Firmware page now shows running and next OTA partitions, flash/sketch/free OTA space, and the actual OTA failure reason.
+- New `/api/system/partitions` endpoint exposes flash/partition diagnostics without modifying flash.
+- GitHub OTA refuses to start when no next OTA partition exists or the image is too large, and reports the exact `Update.getError()` code when `Update.begin()` fails.
+- Manual Web UI firmware uploads now return and display the actual Arduino Update error code.
+- Web Flasher continues to build full images for ATOM Lite, Wemos D1 Mini32, ESP32-C3/S3 SuperMini and Waveshare ESP32-S3 Ethernet.
+
 - 2.0.18R is the fork OTA bridge release for M5Stack ATOM Lite.
 - OTA source is now `sasamix/Solar2MQTT`, so future custom releases appear directly in the built-in Online Update page.
 - Includes the 2.0.18Q PowMr/Home Assistant cleanup and dedicated battery-equalization child device.
