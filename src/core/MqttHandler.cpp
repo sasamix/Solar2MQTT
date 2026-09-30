@@ -1078,6 +1078,24 @@ void MqttHandler::publishHaDiscovery(bool force)
                 purgeHaDiscoveryComponent(_mqtt, deviceId, "binary_sensor", key);
             }
         }
+        else if (isPowMrPiHybridProtocolName(protocol))
+        {
+            // In hybrid mode keep the PI-only values we actively refresh, but
+            // remove stale duplicates/raw fields that are intentionally not
+            // part of the hybrid HA surface.
+            const char *const obsoleteHybridKeys[] = {
+                DESCR_AC_Out_Percent,
+                DESCR_Battery_Load,
+                DESCR_Status_Flag,
+                DESCR_Battery_Voltage_Offset_Fans_On,
+            };
+            const String deviceId = getHaDeviceId();
+            for (const char *key : obsoleteHybridKeys)
+            {
+                purgeHaDiscoveryComponent(_mqtt, deviceId, "sensor", key);
+                purgeHaDiscoveryComponent(_mqtt, deviceId, "binary_sensor", key);
+            }
+        }
     }
 
     std::vector<String> currentTopics;
