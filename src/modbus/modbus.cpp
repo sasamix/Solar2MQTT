@@ -1063,6 +1063,7 @@ bool MODBUS::forceProtocol(protocol_type_t protocol)
     switch (protocol)
     {
     case MODBUS_POWMR:
+    case MODBUS_POWMR_PI:
         device = new PowMr();
         break;
     case MODBUS_DEYE:
@@ -1091,7 +1092,7 @@ bool MODBUS::forceProtocol(protocol_type_t protocol)
     stabilizeSerial();
     _mCom.setResponseTimeout(device->getResponseTimeout());
     staticData[DESCR_Device_Model] = device->getName();
-    staticData[DESCR_Protocol_ID] = protocolToString(protocol);
+    staticData[DESCR_Protocol_ID] = (protocol == MODBUS_POWMR_PI) ? "PI+Modbus" : protocolToString(protocol);
     prepareRegisters();
     writeLog("Modbus protocol forced to %s", protocolToString(protocol));
     return true;
