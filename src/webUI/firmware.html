@@ -307,6 +307,25 @@
       otaPollHandle = null;
     }
 
+    async function fetchOtaDiagnostics(firmwareSize = 0) {
+      try {
+        const res = await fetch("/api/system/partitions?firmwareSize=" + encodeURIComponent(firmwareSize || 0), { cache: "no-store" });
+        if (!res.ok) return;
+        const json = await res.json();
+        const next = json.nextOta || {};
+        const running = json.running || {};
+        const lines = [
+          "OTA: " + (json.otaReady ? "READY" : "NOT READY") + " — " + (json.reason || ""),
+          "Running: " + (running.present ? ((running.label || "?") + " @ 0x" + Number(running.address || 0).toString(16) + ", " + formatBytes(running.size || 0)) : "not found"),
+          "Next OTA: " + (next.present ? ((next.label || "?") + " @ 0x" + Number(next.address || 0).toString(16) + ", " + formatBytes(next.size || 0)) : "not found"),
+          "Flash: " + formatBytes(json.flashSize || 0) + ", sketch: " + formatBytes(json.sketchSize || 0) + ", free OTA space: " + formatBytes(json.freeSketchSpace || 0)
+        ];
+        document.getElementById("otaDiagnostics").textContent = lines.join("\n");
+      } catch {
+        document.getElementById("otaDiagnostics").textContent = "OTA diagnostics unavailable.";
+      }
+    }
+
     async function fetchOtaStatus() {
       try {
         const res = await fetch("/ota/status", { cache: "no-store" });
