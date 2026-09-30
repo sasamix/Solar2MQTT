@@ -1419,24 +1419,20 @@ bool PI_Serial::pollPowMrPiSupplement()
     }
 
     const unsigned long now = millis();
-    bool didWork = false;
 
-    if (powMrPiLastQ1At == 0 || (now - powMrPiLastQ1At) >= 2000UL)
+    // One PI30 request at most per completed Modbus pass. This keeps the
+    // hybrid mode conservative on the shared 2400-baud UART.
+    if (powMrPiFlagRefreshRequested ||
+        powMrPiLastQflagAt == 0 ||
+        (now - powMrPiLastQflagAt) >= 60000UL)
     {
-        if (runPowMrPiSupplementCommand("Q1"))
+        const bool ok = runPowMrPiSupplementCommand("QFLAG");
+        if (ok)
         {
-            powMrPiLastQ1At = now;
+            powMrPiLastQflagAt = now;
+            powMrPiFlagRefreshRequested = false;
         }
-        didWork = true;
-    }
-
-    if (powMrPiLastQpigsAt == 0 || (now - powMrPiLastQpigsAt) >= 5000UL)
-    {
-        if (runPowMrPiSupplementCommand("QPIGS"))
-        {
-            powMrPiLastQpigsAt = now;
-        }
-        didWork = true;
+        return true;
     }
 
     if (powMrPiLastQpiriAt == 0 || (now - powMrPiLastQpiriAt) >= 300000UL)
@@ -1445,22 +1441,28 @@ bool PI_Serial::pollPowMrPiSupplement()
         {
             powMrPiLastQpiriAt = now;
         }
-        didWork = true;
+        return true;
     }
 
-    if (powMrPiFlagRefreshRequested ||
-        powMrPiLastQflagAt == 0 ||
-        (now - powMrPiLastQflagAt) >= 60000UL)
+    if (powMrPiLastQpigsAt == 0 || (now - powMrPiLastQpigsAt) >= 5000UL)
     {
-        if (runPowMrPiSupplementCommand("QFLAG"))
+        if (runPowMrPiSupplementCommand("QPIGS"))
         {
-            powMrPiLastQflagAt = now;
-            powMrPiFlagRefreshRequested = false;
+            powMrPiLastQpigsAt = now;
         }
-        didWork = true;
+        return true;
     }
 
-    return didWork;
+    if (powMrPiLastQ1At == 0 || (now - powMrPiLastQ1At) >= 2000UL)
+    {
+        if (runPowMrPiSupplementCommand("Q1"))
+        {
+            powMrPiLastQ1At = now;
+        }
+        return true;
+    }
+
+    return false;
 }
 
 bool PI_Serial::isValidResponse(const String &response) const
