@@ -1,5 +1,10 @@
 Release Notes
 
+- 2.0.18K makes Home Assistant cleanup protocol-aware for MODBUS_POWMR.
+- Removes stale retained PI30/QPIRI/QPIGS entities that are not updated by the active PowMr Modbus protocol and could show old English names or conflicting values.
+- Keeps the native PowMr Modbus telemetry, Q1 supplemental temperature/fan/charge-state data, dedicated PowMr select/number settings, and native battery power/energy counters.
+- Does not change entity_id/unique_id for supported current entities.
+
 - 2.0.18J completes the Home Assistant entity migration started in 2.0.18I.
 - Explicitly removes retained discovery for obsolete PowMr debug/status entities: `PowMr_Debug_4556`, `PowMr_Debug_4558`, `PowMr_Debug_4559`, `PowMr_Debug_4560`, `PowMr_Debug_4561`, `PowMr_Status_Flags_1`, `PowMr_Status_Flags_2`, and `PowMr_Settings_Flags`.
 - Explicitly removes legacy generic sensor/binary_sensor duplicates for PowMr settings now represented by dedicated select/number entities.
