@@ -162,6 +162,9 @@
 #define DESCR_Record_Fault_Code_Enabled "Record_Fault_Code_Enabled"
 #define DESCR_Data_Log_Pop_Up "Data_Log_Pop_Up"
 #define DESCR_Solar_Feed_To_Grid_Enabled "Solar_Feed_To_Grid_Enabled"
+// QBEQI
+#define DESCR_Battery_Equalization_Enabled "Battery_Equalization_Enabled"
+#define DESCR_Battery_Equalization_Active "Battery_Equalization_Active"
 // QMN
 #define DESCR_Device_Model "Device_Model"
 // QMOD
