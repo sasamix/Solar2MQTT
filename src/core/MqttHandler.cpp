@@ -206,17 +206,13 @@ bool isApprovedHaDiscoveryKey(const char *component, const char *key, bool powMr
     if (strcmp(component, "switch") == 0)
     {
         const char *const switchKeys[] = {
+            // Keep Home Assistant focused on settings that are useful to
+            // automate. Panel/service-only flags live in the Web UI.
             DESCR_Battery_Equalization_Enabled,
-            DESCR_Buzzer_Enabled,
             DESCR_Overload_Bypass_Enabled,
             DESCR_Power_Saving_Enabled,
-            DESCR_LCD_Reset_To_Default_Enabled,
-            DESCR_Data_Log_Pop_Up,
             DESCR_Overload_Restart_Enabled,
             DESCR_Over_Temperature_Restart_Enabled,
-            DESCR_LCD_Backlight_Enabled,
-            DESCR_Primary_Source_Interrupt_Alarm_Enabled,
-            DESCR_Record_Fault_Code_Enabled,
             DESCR_Solar_Feed_To_Grid_Enabled,
         };
         return stringEqualsAny(key, switchKeys, sizeof(switchKeys) / sizeof(switchKeys[0]));
@@ -237,17 +233,6 @@ bool isApprovedHaDiscoveryKey(const char *component, const char *key, bool powMr
             "Battery_Equalization_Time",
             "Battery_Equalization_Timeout",
             "Battery_Equalization_Interval",
-            DESCR_Buzzer_Enabled,
-            DESCR_Overload_Bypass_Enabled,
-            DESCR_Power_Saving_Enabled,
-            DESCR_LCD_Reset_To_Default_Enabled,
-            DESCR_Data_Log_Pop_Up,
-            DESCR_Overload_Restart_Enabled,
-            DESCR_Over_Temperature_Restart_Enabled,
-            DESCR_LCD_Backlight_Enabled,
-            DESCR_Primary_Source_Interrupt_Alarm_Enabled,
-            DESCR_Record_Fault_Code_Enabled,
-            DESCR_Solar_Feed_To_Grid_Enabled,
         };
         return stringEqualsAny(key, numberKeys, sizeof(numberKeys) / sizeof(numberKeys[0]));
     }
@@ -1589,17 +1574,29 @@ void MqttHandler::publishHaPowMrSettings(JsonDocument &snapshot,
                              "Выравнивание АКБ",
                              "powmr pi PBEQE1",
                              "powmr pi PBEQE0");
-        publishSwitch(DESCR_Buzzer_Enabled, "Зуммер", 'a');
         publishSwitch(DESCR_Overload_Bypass_Enabled, "Байпас при перегрузке", 'b');
         publishSwitch(DESCR_Power_Saving_Enabled, "Режим энергосбережения", 'j');
-        publishSwitch(DESCR_LCD_Reset_To_Default_Enabled, "Сброс LCD к значениям по умолчанию", 'k');
-        publishSwitch(DESCR_Data_Log_Pop_Up, "Всплывающее окно журнала", 'l');
         publishSwitch(DESCR_Solar_Feed_To_Grid_Enabled, "Разрешение отдачи в сеть", 'd');
         publishSwitch(DESCR_Overload_Restart_Enabled, "Перезапуск после перегрузки", 'u');
         publishSwitch(DESCR_Over_Temperature_Restart_Enabled, "Перезапуск после перегрева", 'v');
-        publishSwitch(DESCR_LCD_Backlight_Enabled, "Подсветка LCD", 'x');
-        publishSwitch(DESCR_Primary_Source_Interrupt_Alarm_Enabled, "Сигнал потери основного источника", 'y');
-        publishSwitch(DESCR_Record_Fault_Code_Enabled, "Запись кодов ошибок", 'z');
+
+        // These are local panel/service preferences. Keep them configurable in
+        // the inverter Web UI, but remove them from HA to avoid config clutter.
+        const char *const webOnlySwitchKeys[] = {
+            DESCR_Buzzer_Enabled,
+            DESCR_LCD_Reset_To_Default_Enabled,
+            DESCR_Data_Log_Pop_Up,
+            DESCR_LCD_Backlight_Enabled,
+            DESCR_Primary_Source_Interrupt_Alarm_Enabled,
+            DESCR_Record_Fault_Code_Enabled,
+        };
+        for (const char *key : webOnlySwitchKeys)
+        {
+            purgeHaDiscoveryComponent(_mqtt, deviceId, "switch", key);
+            purgeHaDiscoveryComponent(_mqtt, deviceId, "sensor", key);
+            purgeHaDiscoveryComponent(_mqtt, deviceId, "binary_sensor", key);
+            purgeHaDiscoveryComponent(_mqtt, deviceId, "number", key);
+        }
     }
     else if (force)
     {

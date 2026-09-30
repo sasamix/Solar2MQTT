@@ -98,6 +98,12 @@
         <div class="detailSplitter">Equalization</div>
         <p class="field-note">For LIL/PYLON these parameters normally should not be used for manual charge control. They are shown because the registers are known.</p>
 
+        <label class="switch-row" for="invEqEnabled">
+          <span>Equalization enabled</span>
+          <input id="invEqEnabled" class="ea-switch" type="checkbox">
+        </label>
+        <div class="kv"><span class="k">Equalization active now</span><span class="v" id="invEqActive">-</span></div>
+
         <label for="invEqVoltage">Equalization voltage, V</label>
         <input id="invEqVoltage" type="number" min="40" max="60" step="0.1" data-setting="equalizationvoltage">
 
@@ -109,6 +115,54 @@
 
         <label for="invEqInterval">Equalization interval, days</label>
         <input id="invEqInterval" type="number" min="0" max="999" step="1" data-setting="equalizationinterval">
+
+        <div class="detailSplitter">Device flags</div>
+        <p id="invPiSettingsNote" class="field-note">These switches require PI+Modbus mode.</p>
+
+        <label class="switch-row" for="invBuzzer">
+          <span>Buzzer</span>
+          <input id="invBuzzer" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invOverloadBypass">
+          <span>Overload bypass</span>
+          <input id="invOverloadBypass" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invPowerSaving">
+          <span>Power saving</span>
+          <input id="invPowerSaving" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invLcdReset">
+          <span>LCD reset to default</span>
+          <input id="invLcdReset" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invDataLogPopup">
+          <span>Data log pop-up</span>
+          <input id="invDataLogPopup" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invFeedToGrid">
+          <span>Solar feed to grid</span>
+          <input id="invFeedToGrid" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invOverloadRestart">
+          <span>Restart after overload</span>
+          <input id="invOverloadRestart" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invOverTempRestart">
+          <span>Restart after over-temperature</span>
+          <input id="invOverTempRestart" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invLcdBacklight">
+          <span>LCD backlight</span>
+          <input id="invLcdBacklight" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invPrimaryAlarm">
+          <span>Primary source interrupt alarm</span>
+          <input id="invPrimaryAlarm" class="ea-switch" type="checkbox">
+        </label>
+        <label class="switch-row" for="invRecordFault">
+          <span>Record fault code</span>
+          <input id="invRecordFault" class="ea-switch" type="checkbox">
+        </label>
 
         <div class="button-stack" style="margin-top:16px;">
           <button id="inverterReloadBtn" type="button" class="btn btn-outline">Reload values</button>
