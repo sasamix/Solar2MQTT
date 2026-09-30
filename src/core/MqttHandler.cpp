@@ -810,6 +810,17 @@ bool MqttHandler::ensureConnected()
             "Battery_Equalization_Time",
             "Battery_Equalization_Timeout",
             "Battery_Equalization_Interval",
+            DESCR_Buzzer_Enabled,
+            DESCR_Overload_Bypass_Enabled,
+            DESCR_Power_Saving_Enabled,
+            DESCR_LCD_Reset_To_Default_Enabled,
+            DESCR_Data_Log_Pop_Up,
+            DESCR_Overload_Restart_Enabled,
+            DESCR_Over_Temperature_Restart_Enabled,
+            DESCR_LCD_Backlight_Enabled,
+            DESCR_Primary_Source_Interrupt_Alarm_Enabled,
+            DESCR_Record_Fault_Code_Enabled,
+            DESCR_Solar_Feed_To_Grid_Enabled,
         };
         for (const char *key : oldSettingSensorKeys)
         {
